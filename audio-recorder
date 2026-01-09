@@ -5,7 +5,6 @@ RECORDINGS_DIR="$HOME/Enregistrements"
 mkdir -p "$RECORDINGS_DIR"
 
 PID_FILE="/tmp/audio-recorder.pid"
-HF_TOKEN="${HF_TOKEN:?Set HF_TOKEN with your HuggingFace token}"
 
 get_sources() {
     MONITOR=$(pactl list short sources | grep "monitor" | grep -v "SUSPENDED" | head -1 | cut -f2)
@@ -66,6 +65,11 @@ status() {
 }
 
 transcribe() {
+    if [ -z "$HF_TOKEN" ]; then
+        echo "❌ HF_TOKEN non défini. Export ton token HuggingFace d'abord."
+        return 1
+    fi
+
     local folder="$1"
     local model="${2:-small}"
 
