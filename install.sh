@@ -24,6 +24,14 @@ echo "[OK] Installed to $BIN_DIR/audio-recorder"
 ln -sf "$REPO_DIR/audio-recorder.bash-completion" "$COMPLETION_DIR/audio-recorder"
 echo "[OK] Bash completion installed"
 
+# Copy default prompt template to Recordings
+RECORDINGS_DIR="$HOME/Recordings"
+mkdir -p "$RECORDINGS_DIR"
+if [ ! -f "$RECORDINGS_DIR/summarize-prompt.md" ]; then
+    cp "$REPO_DIR/summarize-prompt.default.md" "$RECORDINGS_DIR/summarize-prompt.md" 2>/dev/null || true
+    [ -f "$RECORDINGS_DIR/summarize-prompt.md" ] && echo "[OK] Prompt template copied to $RECORDINGS_DIR/"
+fi
+
 # Check if ~/.local/bin is in PATH
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     echo ""

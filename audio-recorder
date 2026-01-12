@@ -331,9 +331,11 @@ cmd_summarize() {
         return 1
     fi
 
-    local prompt_file="$SCRIPT_DIR/summarize-prompt.md"
+    # Look for prompt template in recordings dir, then script dir
+    local prompt_file="$RECORDINGS_DIR/summarize-prompt.md"
+    [ ! -f "$prompt_file" ] && prompt_file="$SCRIPT_DIR/summarize-prompt.md"
     if [ ! -f "$prompt_file" ]; then
-        error "Prompt template not found: $prompt_file"
+        error "Prompt template not found. Create $RECORDINGS_DIR/summarize-prompt.md"
         return 1
     fi
 
