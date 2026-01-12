@@ -1,52 +1,80 @@
 # audio-recorder
 
-Record audio (mic + system) with automatic transcription via WhisperX (speaker diarization included).
+Record audio (mic + system), transcribe with WhisperX, and summarize with Claude AI.
 
-## Dependencies
+Works on **Linux** and **macOS**.
 
-```bash
-# FFmpeg for recording
-sudo apt install ffmpeg
-
-# WhisperX for transcription
-pipx install whisperx
-```
-
-Note: WhisperX requires a HuggingFace token and accepting conditions at:
-- https://hf.co/pyannote/speaker-diarization-3.1
-- https://hf.co/pyannote/segmentation-3.0
-
-## Installation
+## Quick Start
 
 ```bash
-git clone git@github.com:AlexisLaporte/audio-recorder.git
-ln -s $(pwd)/audio-recorder/audio-recorder ~/.local/bin/audio-recorder
-```
+# Install
+git clone https://github.com/AlexisLaporte/audio-recorder.git
+cd audio-recorder && ./install.sh
 
-## Configuration
+# Configure
+audio-recorder setup
 
-Set your HuggingFace token in `~/.bashrc` or `.envrc`:
-```bash
-export HF_TOKEN="hf_xxx"
+# Record
+audio-recorder start
+audio-recorder stop              # Auto-transcribes & summarizes
 ```
 
 ## Usage
 
 ```bash
-audio-recorder start      # Start recording
-audio-recorder stop       # Stop recording
-audio-recorder status     # Show status
-audio-recorder list       # List recordings
-audio-recorder transcribe # Transcribe latest recording
+audio-recorder start                     # Start recording
+audio-recorder stop                      # Stop → transcribe → summarize
+audio-recorder stop --only               # Stop without processing
+audio-recorder stop --comment "context"  # Stop with context for AI
+audio-recorder status                    # Show recording status & duration
+
+audio-recorder transcribe [folder]       # Transcribe only
+audio-recorder summarize [folder]        # Summarize only
+audio-recorder summarize -c "context"    # Summarize with context
+
+audio-recorder list                      # List recordings
+audio-recorder open [folder]             # Open in file manager
+audio-recorder setup                     # Configure settings
 ```
 
-## Output structure
+## Output
 
 ```
-~/Enregistrements/
-└── recording_YYYYMMDD_HHMMSS/
-    ├── audio.mp3
-    └── transcript.txt
+~/Recordings/
+└── meeting_budget_q1/           # Renamed after summarize
+    ├── audio.mp3                # Original recording
+    ├── transcript.txt           # WhisperX transcription (speaker diarization)
+    └── summary.md               # AI summary with highlights & notes
 ```
 
-Transcript includes speaker identification (`[SPEAKER_00]`, `[SPEAKER_01]`, etc.).
+## Summary Format
+
+The AI generates a structured markdown summary:
+- **Title**: Descriptive title
+- **Highlights**: 3-5 key takeaways
+- **Summary**: Brief overview
+- **Notes**: Condensed exchange flow
+- **Action Items**: Tasks mentioned (if any)
+
+Customize the format by editing `summarize-prompt.md`.
+
+## Installation
+
+The installer:
+- Installs CLI to `~/.local/bin`
+- Sets up bash completion
+- Checks/installs dependencies (ffmpeg, whisperx)
+
+### macOS: System Audio
+
+To capture system audio (not just mic), install BlackHole:
+```bash
+brew install blackhole-2ch
+```
+Then create a Multi-Output Device in Audio MIDI Setup.
+
+### HuggingFace
+
+WhisperX requires accepting conditions:
+- https://hf.co/pyannote/speaker-diarization-3.1
+- https://hf.co/pyannote/segmentation-3.0
