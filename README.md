@@ -1,52 +1,53 @@
 # audio-recorder
 
-Record audio (mic + system) with automatic transcription via WhisperX (speaker diarization included).
-
-## Dependencies
+Record → Transcribe → Summarize. One command.
 
 ```bash
-# FFmpeg for recording
-sudo apt install ffmpeg
-
-# WhisperX for transcription
-pipx install whisperx
+audio-recorder start    # Start recording
+audio-recorder stop     # Stop + transcribe + AI summary
 ```
 
-Note: WhisperX requires a HuggingFace token and accepting conditions at:
-- https://hf.co/pyannote/speaker-diarization-3.1
-- https://hf.co/pyannote/segmentation-3.0
-
-## Installation
+## Install
 
 ```bash
-git clone git@github.com:AlexisLaporte/audio-recorder.git
-ln -s $(pwd)/audio-recorder/audio-recorder ~/.local/bin/audio-recorder
+git clone https://github.com/AlexisLaporte/audio-recorder.git
+cd audio-recorder && ./install.sh
+audio-recorder setup    # Configure HuggingFace token
 ```
 
-## Configuration
+**Requirements**: ffmpeg, [whisperx](https://github.com/m-bain/whisperX), [claude](https://github.com/anthropics/claude-code)
 
-Set your HuggingFace token in `~/.bashrc` or `.envrc`:
-```bash
-export HF_TOKEN="hf_xxx"
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `start` | Start recording (mic + system audio) |
+| `stop` | Stop → transcribe → summarize |
+| `stop --only` | Stop without processing |
+| `stop -c "context"` | Stop with context for AI |
+| `status` | Show recording status |
+| `list` | List recordings |
+| `open [folder]` | Open in file manager |
+| `transcribe [folder]` | Transcribe only |
+| `summarize [folder]` | Summarize only |
+| `setup` | Configure settings |
+
+## Output
+
 ```
-
-## Usage
-
-```bash
-audio-recorder start      # Start recording
-audio-recorder stop       # Stop recording
-audio-recorder status     # Show status
-audio-recorder list       # List recordings
-audio-recorder transcribe # Transcribe latest recording
-```
-
-## Output structure
-
-```
-~/Enregistrements/
-└── recording_YYYYMMDD_HHMMSS/
+~/Recordings/
+├── summarize-prompt.md          # Customize AI prompt
+└── meeting_name/
     ├── audio.mp3
-    └── transcript.txt
+    ├── transcript.txt           # Speaker diarization
+    └── summary.md               # Highlights + notes
 ```
 
-Transcript includes speaker identification (`[SPEAKER_00]`, `[SPEAKER_01]`, etc.).
+## Platforms
+
+- **Linux**: PulseAudio
+- **macOS**: AVFoundation + [BlackHole](https://github.com/ExistentialAudio/BlackHole) for system audio
+
+## License
+
+MIT

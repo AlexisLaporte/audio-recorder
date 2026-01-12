@@ -1,0 +1,38 @@
+# Bash completion for audio-recorder
+
+_audio_recorder() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+    local cmd="${COMP_WORDS[1]}"
+    local commands="start stop status transcribe summarize list open setup help"
+
+    # Load config for RECORDINGS_DIR
+    local recordings_dir="$HOME/Recordings"
+    [ -f "$HOME/.config/audio-recorder/config" ] && source "$HOME/.config/audio-recorder/config"
+
+    # First argument: command
+    if [ $COMP_CWORD -eq 1 ]; then
+        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+        return
+    fi
+
+    # Second+ arguments based on command
+    case "$cmd" in
+        stop)
+            COMPREPLY=($(compgen -W "--only --comment" -- "$cur"))
+            ;;
+        transcribe|summarize|open)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--comment" -- "$cur"))
+            else
+                # List folders in recordings dir
+                if [ -d "$recordings_dir" ]; then
+                    local folders=$(ls -1 "$recordings_dir" 2>/dev/null)
+                    COMPREPLY=($(compgen -W "$folders" -- "$cur"))
+                fi
+            fi
+            ;;
+    esac
+}
+
+complete -F _audio_recorder audio-recorder
