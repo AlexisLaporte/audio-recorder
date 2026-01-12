@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create release archive
+        run: |
+          mkdir -p dist
+          tar -czvf dist/audio-recorder-${{ steps.version.outputs.VERSION }}.tar.gz \
+            --transform 's,^,audio-recorder/,' \
+            audio-recorder \
+            audio-recorder.bash-completion \
+            claude-skill.md \
+            install.sh \
+            summarize-prompt.default.md \
+            README.md
+
+      - name: Create install script
+        run: |
+          cat > dist/install.sh << 'SCRIPT'
+          #!/bin/bash
+          # One-line installer for audio-recorder
+          set -e
+          VERSION="${1:-latest}"
+          REPO="AlexisLaporte/audio-recorder"
+
+          if [ "$VERSION" = "latest" ]; then
+            VERSION=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+          fi
+
+          echo "Installing audio-recorder $VERSION..."
+
+          TMPDIR=$(mktemp -d)
+          cd "$TMPDIR"
+          curl -sL "https://github.com/$REPO/releases/download/$VERSION/audio-recorder-$VERSION.tar.gz" | tar xz
+          cd audio-recorder
+          ./install.sh
+          cd /
+          rm -rf "$TMPDIR"
+
+          echo "Done! Run 'audio-recorder setup' to configure."
+          SCRIPT
+          chmod +x dist/install.sh
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          git log $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")..HEAD --pretty=format:"- %s" >> $GITHUB_OUTPUT || echo "- Initial release" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## Install
+
+            ```bash
+            curl -sL https://github.com/AlexisLaporte/audio-recorder/releases/download/${{ steps.version.outputs.VERSION }}/install.sh | bash
+            ```
+
+            Or manually:
+            ```bash
+            git clone https://github.com/AlexisLaporte/audio-recorder.git
+            cd audio-recorder && ./install.sh
+            ```
+
+            ## Changes
+            ${{ steps.changelog.outputs.CHANGELOG }}
+          files: |
+            dist/audio-recorder-${{ steps.version.outputs.VERSION }}.tar.gz
+            dist/install.sh
