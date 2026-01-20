@@ -5,6 +5,7 @@ set -e
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
+LIB_DIR="$HOME/.local/lib/audio-recorder"
 COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
 
 OS="$(uname -s)"
@@ -14,7 +15,12 @@ echo ""
 
 # Create directories
 mkdir -p "$BIN_DIR"
+mkdir -p "$LIB_DIR"
 mkdir -p "$COMPLETION_DIR"
+
+# Copy lib modules
+cp -r "$REPO_DIR/lib/"* "$LIB_DIR/"
+echo "[OK] Lib modules installed to $LIB_DIR"
 
 # Symlink binary
 ln -sf "$REPO_DIR/audio-recorder" "$BIN_DIR/audio-recorder"
@@ -96,13 +102,21 @@ fi
 
 [ $MISSING -eq 1 ] && install_deps
 
-# macOS: check for BlackHole
+# macOS: check for system audio capture
 if [ "$OS" = "Darwin" ]; then
     echo ""
-    echo "=== macOS note ==="
-    echo "For system audio capture, install BlackHole:"
-    echo "  brew install blackhole-2ch"
-    echo "Then set up a Multi-Output Device in Audio MIDI Setup."
+    echo "=== macOS: system audio capture ==="
+    if system_profiler SPAudioDataType 2>/dev/null | grep -q "Background Music"; then
+        echo "[OK] Background Music detected"
+    else
+        echo "[MISSING] No system audio capture tool found"
+        echo ""
+        echo "Install Background Music (recommended, no config needed):"
+        echo "  brew install --cask background-music"
+        echo ""
+        echo "Or BlackHole (requires manual Audio MIDI Setup):"
+        echo "  brew install blackhole-2ch"
+    fi
 fi
 
 # Claude skill

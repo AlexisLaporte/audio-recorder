@@ -21,7 +21,20 @@ _audio_recorder() {
         stop)
             COMPREPLY=($(compgen -W "--only --comment" -- "$cur"))
             ;;
-        transcribe|summarize|open)
+        transcribe)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--comment" -- "$cur"))
+            else
+                # Complete both audio files and folders in recordings dir
+                compopt -o filenames
+                COMPREPLY=($(compgen -f -X '!*.@(mp3|wav|m4a|ogg|flac|webm|mp4)' -- "$cur"))
+                if [ -d "$recordings_dir" ]; then
+                    local folders=$(ls -1 "$recordings_dir" 2>/dev/null)
+                    COMPREPLY+=($(compgen -W "$folders" -- "$cur"))
+                fi
+            fi
+            ;;
+        summarize|open)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--comment" -- "$cur"))
             else

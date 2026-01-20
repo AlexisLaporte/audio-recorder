@@ -24,38 +24,13 @@ jobs:
           tar -czvf dist/audio-recorder-${{ steps.version.outputs.VERSION }}.tar.gz \
             --transform 's,^,audio-recorder/,' \
             audio-recorder \
+            lib \
             audio-recorder.bash-completion \
             claude-skill.md \
             install.sh \
             summarize-prompt.default.md \
-            README.md
-
-      - name: Create install script
-        run: |
-          cat > dist/install.sh << 'SCRIPT'
-          #!/bin/bash
-          # One-line installer for audio-recorder
-          set -e
-          VERSION="${1:-latest}"
-          REPO="AlexisLaporte/audio-recorder"
-
-          if [ "$VERSION" = "latest" ]; then
-            VERSION=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
-          fi
-
-          echo "Installing audio-recorder $VERSION..."
-
-          TMPDIR=$(mktemp -d)
-          cd "$TMPDIR"
-          curl -sL "https://github.com/$REPO/releases/download/$VERSION/audio-recorder-$VERSION.tar.gz" | tar xz
-          cd audio-recorder
-          ./install.sh
-          cd /
-          rm -rf "$TMPDIR"
-
-          echo "Done! Run 'audio-recorder setup' to configure."
-          SCRIPT
-          chmod +x dist/install.sh
+            README.md \
+            CLAUDE.md
 
       - name: Generate changelog
         id: changelog
@@ -72,18 +47,17 @@ jobs:
           body: |
             ## Install
 
+            Requires [Claude Code](https://github.com/anthropics/claude-code)
+
             ```bash
-            curl -sL https://github.com/AlexisLaporte/audio-recorder/releases/download/${{ steps.version.outputs.VERSION }}/install.sh | bash
+            tar xzf audio-recorder-${{ steps.version.outputs.VERSION }}.tar.gz
+            cd audio-recorder
+            claude
             ```
 
-            Or manually:
-            ```bash
-            git clone https://github.com/AlexisLaporte/audio-recorder.git
-            cd audio-recorder && ./install.sh
-            ```
+            Then ask Claude to install.
 
             ## Changes
             ${{ steps.changelog.outputs.CHANGELOG }}
           files: |
             dist/audio-recorder-${{ steps.version.outputs.VERSION }}.tar.gz
-            dist/install.sh

@@ -77,29 +77,18 @@ resources from engineering to marketing...
 
 ## 📦 Installation
 
-### Quick Install
+**Requires [Claude Code](https://github.com/anthropics/claude-code)**
+
+1. [Download the latest release](https://github.com/AlexisLaporte/audio-recorder/releases/latest)
+2. Extract and open with Claude Code:
 
 ```bash
-curl -sL https://github.com/AlexisLaporte/audio-recorder/releases/latest/download/install.sh | bash
-```
-
-### Manual Install
-
-```bash
-git clone https://github.com/AlexisLaporte/audio-recorder.git
+tar xzf audio-recorder-*.tar.gz
 cd audio-recorder
-./install.sh
+claude
 ```
 
-### Setup
-
-```bash
-audio-recorder setup
-```
-
-You'll need a [HuggingFace token](https://huggingface.co/settings/tokens) and to accept conditions for:
-- [pyannote/speaker-diarization-3.1](https://hf.co/pyannote/speaker-diarization-3.1)
-- [pyannote/segmentation-3.0](https://hf.co/pyannote/segmentation-3.0)
+3. Ask Claude to install. It will guide you through setup (dependencies, HuggingFace token, etc.)
 
 <br>
 
@@ -165,13 +154,15 @@ audio-recorder setup
 Works out of the box with PulseAudio. Captures both microphone and system audio.
 
 ### macOS
-Requires [BlackHole](https://github.com/ExistentialAudio/BlackHole) for system audio capture:
+Requires a virtual audio device for system audio capture:
 
 ```bash
+# Recommended (no config needed)
+brew install --cask background-music
+
+# Alternative (requires Audio MIDI Setup)
 brew install blackhole-2ch
 ```
-
-Then create a Multi-Output Device in Audio MIDI Setup to route system audio through BlackHole.
 
 <br>
 
