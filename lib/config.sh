@@ -22,6 +22,9 @@ load_config() {
     # shellcheck source=/dev/null
     [ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
     mkdir -p "$RECORDINGS_DIR"
+
+    # Default context base dir for CRM/projects
+    CONTEXT_BASE_DIR="${CONTEXT_BASE_DIR:-$HOME}"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -45,10 +48,17 @@ setup() {
     read -rp "Recordings directory [$RECORDINGS_DIR]: " new_dir
     [ -n "$new_dir" ] && RECORDINGS_DIR="${new_dir/#\~/$HOME}"
 
+    # Context base directory (for CRM/projects)
+    local current_context="${CONTEXT_BASE_DIR:-$HOME}"
+    read -rp "Context base directory [$current_context]: " new_context
+    [ -n "$new_context" ] && CONTEXT_BASE_DIR="${new_context/#\~/$HOME}"
+    [ -z "$CONTEXT_BASE_DIR" ] && CONTEXT_BASE_DIR="$current_context"
+
     # Save
     cat > "$CONFIG_FILE" << EOF
 HF_TOKEN="$HF_TOKEN"
 RECORDINGS_DIR="$RECORDINGS_DIR"
+CONTEXT_BASE_DIR="$CONTEXT_BASE_DIR"
 EOF
     chmod 600 "$CONFIG_FILE"
     mkdir -p "$RECORDINGS_DIR"

@@ -8,18 +8,18 @@
 
 cmd_summarize() {
     local folder=""
-    local comment=""
+    local no_context=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --comment|-c) comment="$2"; shift 2 ;;
+            --no-context|-n) no_context=true; shift ;;
             *) folder="$1"; shift ;;
         esac
     done
 
-    # Default to latest recording
+    # Default to latest recording (directories only)
     if [ -z "$folder" ]; then
-        folder=$(ls -td "$RECORDINGS_DIR"/* 2>/dev/null | head -1)
+        folder=$(find "$RECORDINGS_DIR" -maxdepth 1 -type d -name "recording_*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
     fi
     [[ ! "$folder" == /* ]] && folder="$RECORDINGS_DIR/$folder"
 
@@ -29,79 +29,81 @@ cmd_summarize() {
         return 1
     fi
 
-    # Look for prompt template in recordings dir, then script dir
-    local prompt_file="$RECORDINGS_DIR/summarize-prompt.md"
-    [ ! -f "$prompt_file" ] && prompt_file="$SCRIPT_DIR/summarize-prompt.md"
-    if [ ! -f "$prompt_file" ]; then
-        error "Prompt template not found. Create $RECORDINGS_DIR/summarize-prompt.md"
-        return 1
+    # Ensure CLAUDE.md exists in recordings dir
+    ensure_recordings_claude_md
+
+    local folder_name
+    folder_name=$(basename "$folder")
+
+    # Build prompt for Claude
+    local prompt
+    if [ "$no_context" = true ]; then
+        prompt="Lis $folder_name/transcript.txt et génère un résumé structuré (highlights, résumé, notes, actions). Écris-le dans $folder_name/summary.md puis propose un nom descriptif pour renommer le dossier."
+    else
+        prompt="Tu dois synthétiser l'enregistrement dans $folder_name/transcript.txt.
+
+Étape 1: Demande-moi le contexte (client/projet, type de réunion, participants si connus).
+Étape 2: Après ma réponse, lis le transcript et cherche le dossier CRM correspondant si pertinent.
+Étape 3: Génère un résumé structuré et écris-le dans $folder_name/summary.md.
+Étape 4: Propose un nom descriptif pour renommer le dossier.
+
+Commence par me demander le contexte."
     fi
 
-    info "Summarizing with Claude..."
-
-    # Build prompt
-    local prompt result new_name summary
-    prompt=$(cat "$prompt_file")
-    [ -n "$comment" ] && prompt="$prompt
-
-## User Context
-$comment"
-    prompt="$prompt
-
----
-
-## Transcript
-
-$(cat "$transcript")"
-
-    # Call Claude
-    result=$(claude -p "$prompt" 2>&1)
-
-    new_name=$(echo "$result" | grep "^FOLDER_NAME:" | tail -1 | sed 's/FOLDER_NAME: *//')
-    summary=$(echo "$result" | sed '/^FOLDER_NAME:/,$d')
-
-    if [ -z "$summary" ]; then
-        error "Summarization failed"
-        echo "$result"
-        return 1
-    fi
-
-    echo "$summary" > "$folder/summary.md"
-    success "Summary: $folder/summary.md"
-
-    # Preview
+    info "Lancement de Claude pour la synthèse..."
     echo ""
-    echo -e "${DIM}────────────────────────────────────────${NC}"
-    head -15 "$folder/summary.md"
-    echo -e "${DIM}...${NC}"
-    echo -e "${DIM}────────────────────────────────────────${NC}"
 
-    # Rename
-    if [ -n "$new_name" ]; then
-        echo ""
-        info "Suggested name: ${BOLD}$new_name${NC}"
-        read -rp "Rename folder? [Y/n] " confirm
-        if [[ ! "$confirm" =~ ^[Nn] ]]; then
-            local new_folder="$RECORDINGS_DIR/$new_name"
-            if [ -d "$new_folder" ]; then
-                error "Folder already exists: $new_name"
-                return 1
-            fi
-            mv "$folder" "$new_folder"
-            folder="$new_folder"
-            success "Renamed to: $new_name"
-        fi
-    fi
+    # Launch Claude interactively from recordings dir
+    cd "$RECORDINGS_DIR" && claude --add-dir "${CONTEXT_BASE_DIR:-/data/alexis/pro}" "$prompt"
+}
 
-    # Final summary
-    echo ""
-    echo -e "${GREEN}${BOLD}Done!${NC}"
-    echo -e "  ${DIM}$folder${NC}"
-    echo -e "  ├── audio.mp3"
-    echo -e "  ├── transcript.txt"
-    echo -e "  └── summary.md"
+# Ensure CLAUDE.md exists in recordings directory
+ensure_recordings_claude_md() {
+    local claude_md="$RECORDINGS_DIR/CLAUDE.md"
+    [ -f "$claude_md" ] && return
 
-    notify "Processing complete" "$(basename "$folder")"
+    cat > "$claude_md" << 'EOF'
+# Recordings - Audio Recorder
+
+Ce dossier contient les enregistrements audio transcrits.
+
+## Structure d'un enregistrement
+
+Chaque sous-dossier contient :
+- `audio.mp3` - L'enregistrement audio
+- `transcript.txt` - La transcription (WhisperX avec diarization)
+- `summary.md` - Le résumé (à créer)
+
+## Instructions de synthèse
+
+Quand on te demande de synthétiser un enregistrement :
+
+1. **Lis le transcript** dans le dossier indiqué
+2. **Demande le contexte** si pas fourni (client, projet, type de réunion)
+3. **Cherche le dossier CRM** correspondant dans `/data/alexis/pro/crm/` pour enrichir le contexte
+4. **Génère un résumé structuré** avec :
+   - Titre descriptif
+   - Highlights (3-5 points clés)
+   - Résumé (2-3 paragraphes)
+   - Notes condensées du flux de discussion
+   - Actions à faire (si mentionnées)
+5. **Écris le résumé** dans `summary.md` du dossier de l'enregistrement
+6. **Propose un nom** descriptif pour renommer le dossier (snake_case, max 40 chars)
+7. **Mets à jour le CRM** si pertinent (créer/màj fiche client, CR de réunion)
+
+## Dossier CRM
+
+Le CRM est dans `/data/alexis/pro/crm/` avec la structure :
+- `0-cold/` - Prospects froids
+- `1-outreach/` - En cours de contact
+- `2-warm/` - En discussion
+- `3-negotiation/` - En négociation
+- `clients/` - Clients actifs
+
+Chaque dossier client contient des fiches `.md` et des CR de réunions.
+EOF
+
+    success "Created $claude_md"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -136,7 +138,7 @@ cmd_open() {
     local folder="$1"
 
     if [ -z "$folder" ]; then
-        folder=$(ls -td "$RECORDINGS_DIR"/* 2>/dev/null | head -1)
+        folder=$(find "$RECORDINGS_DIR" -maxdepth 1 -type d -name "recording_*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
     fi
     [[ ! "$folder" == /* ]] && folder="$RECORDINGS_DIR/$folder"
 

@@ -82,13 +82,11 @@ cmd_start() {
 
 cmd_stop() {
     local process_audio=true
-    local comment=""
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --only) process_audio=false; shift ;;
-            --comment|-c) comment="$2"; shift 2 ;;
             *) shift ;;
         esac
     done
@@ -125,11 +123,13 @@ cmd_stop() {
         echo -e "${BOLD}Processing...${NC}"
         echo ""
 
-        # Transcribe
+        # Transcribe then launch Claude for summary
         if cmd_transcribe "$folder"; then
-            # Summarize
-            if [ -n "$comment" ]; then
-                cmd_summarize "$folder" --comment "$comment"
+            # Ask if Claude should request context
+            echo ""
+            read -rp "Demander contexte à Claude ? [Y/n] " ask_context
+            if [[ "$ask_context" =~ ^[Nn] ]]; then
+                cmd_summarize "$folder" --no-context
             else
                 cmd_summarize "$folder"
             fi
