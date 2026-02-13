@@ -1,0 +1,4 @@
+whisperx @ git+https://github.com/m-bain/whisperX@main
+anthropic>=0.40.0
+requests>=2.31.0
+torch>=2.0.0
