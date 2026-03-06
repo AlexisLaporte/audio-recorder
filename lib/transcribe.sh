@@ -14,6 +14,7 @@ cmd_transcribe() {
 
     local input="$1"
     local model="${2:-small}"
+    local num_speakers="$3"
     local audio=""
     local output_dir=""
     local basename_noext=""
@@ -43,6 +44,20 @@ cmd_transcribe() {
         return 1
     fi
 
+    # Extract audio from video files
+    local mime
+    mime=$(file --mime-type -b "$audio")
+    if [[ "$mime" == video/* ]]; then
+        local extracted="$output_dir/${basename_noext}.mp3"
+        info "Extracting audio from video..."
+        ffmpeg -i "$audio" -vn -acodec libmp3lame -q:a 2 "$extracted" -y -loglevel error || {
+            error "Failed to extract audio from video"
+            return 1
+        }
+        audio="$extracted"
+        basename_noext="$(basename "$audio" | sed 's/\.[^.]*$//')"
+    fi
+
     info "Transcribing with WhisperX (model: $model)..."
     info "Input: $audio"
 
@@ -50,10 +65,17 @@ cmd_transcribe() {
     local progress_file="$output_dir/progress.txt"
     : > "$progress_file"  # Clear/create progress file
 
-    whisperx "$audio" \
+    local speaker_args=()
+    if [ -n "$num_speakers" ]; then
+        speaker_args=(--min_speakers "$num_speakers" --max_speakers "$num_speakers")
+    fi
+
+    PYTHONWARNINGS=ignore whisperx "$audio" \
         --model "$model" \
         --diarize \
+        --diarize_model "pyannote/speaker-diarization-3.1" \
         --hf_token "$HF_TOKEN" \
+        "${speaker_args[@]}" \
         --output_dir "$output_dir" 2>&1 | awk -v pf="$progress_file" '
             /^Transcript:/ {
                 sub(/^Transcript: \[[^]]+\]  /, "")

@@ -120,20 +120,19 @@ cmd_stop() {
     # Process if requested
     if [ "$process_audio" = true ]; then
         echo ""
+        read -rp "Transcrire maintenant ? [Y/n] " do_transcribe
+        if [[ "$do_transcribe" =~ ^[Nn] ]]; then
+            return 0
+        fi
+
+        local num_speakers=""
+        read -rp "Combien de speakers ? [auto] " num_speakers
+
+        echo ""
         echo -e "${BOLD}Processing...${NC}"
         echo ""
 
-        # Transcribe then launch Claude for summary
-        if cmd_transcribe "$folder"; then
-            # Ask if Claude should request context
-            echo ""
-            read -rp "Demander contexte à Claude ? [Y/n] " ask_context
-            if [[ "$ask_context" =~ ^[Nn] ]]; then
-                cmd_summarize "$folder" --no-context
-            else
-                cmd_summarize "$folder"
-            fi
-        fi
+        cmd_transcribe "$folder" "" "$num_speakers"
     fi
 }
 

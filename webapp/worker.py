@@ -1,4 +1,4 @@
-"""Audio recorder worker: poll tuls API, transcribe with WhisperX, summarize with Claude."""
+"""GPU worker: poll tuls API for jobs, dispatch to handlers (WhisperX, Ollama)."""
 
 import json
 import os
@@ -22,51 +22,56 @@ SCW_ZONE = os.environ.get('SCW_ZONE', 'fr-par-1')
 POLL_INTERVAL = 5  # seconds
 IDLE_SHUTDOWN_MINUTES = 10
 CLAUDE_MODEL = 'claude-sonnet-4-5-20250929'
+HEARTBEAT_FILE = '/tmp/worker-heartbeat'
 
 HEADERS = {
     'Authorization': f'Bearer {WORKER_TOKEN}',
     'Content-Type': 'application/json',
 }
 
-SUMMARY_PROMPT = """You are analyzing a transcribed audio recording. Generate a structured summary in markdown format.
 
-## Output Format
+# ── Job handlers ──
 
-# [Short descriptive title]
 
-## Highlights
-- Key point 1
-- Key point 2
-- Key point 3
-(3-5 bullet points capturing the most important takeaways)
+def handle_transcribe(job):
+    """Download audio, run WhisperX, return transcript + duration."""
+    audio_path = None
+    try:
+        audio_path = download_file(job)
+        language = job['input_data'].get('language', 'fr')
+        transcript, duration = transcribe(audio_path, language)
+        return {'transcript': transcript, 'duration_seconds': duration}
+    finally:
+        if audio_path and os.path.exists(audio_path):
+            os.remove(audio_path)
 
-## Summary
-Brief 2-3 paragraph overview of the conversation/recording.
 
-## Notes
-Condensed version of the exchange, capturing the flow and key moments:
+def handle_llm_call(job):
+    """Call Claude API, return generated text."""
+    text = job['input_data']['text']
+    prompt = job['input_data']['prompt']
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    message = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=4096,
+        messages=[{'role': 'user', 'content': f'{prompt}\n\n---\n\n{text}'}],
+    )
+    return {'text': message.content[0].text}
 
-- **[Speaker/Topic]**: Main point or statement
-- **[Speaker/Topic]**: Response or follow-up
 
-(Keep it concise but preserve the logical flow of the discussion)
+HANDLERS = {
+    'transcribe': handle_transcribe,
+    'llm_call': handle_llm_call,
+}
 
-## Action Items
-- [ ] Task 1 (if any)
-- [ ] Task 2 (if any)
-(Only include if actionable items were mentioned)
 
-## Guidelines
-- Be concise and factual
-- Preserve speaker attributions when relevant
-- Focus on substance over pleasantries
-- Use bullet points for readability"""
+# ── Core functions ──
 
 
 def poll_job():
     """Get the next pending job from tuls API."""
     try:
-        resp = requests.get(f'{TULS_API}/api/audio/pending', headers=HEADERS, timeout=15)
+        resp = requests.get(f'{TULS_API}/api/worker/jobs/next', headers=HEADERS, timeout=15)
         if resp.status_code != 200:
             print(f'[poll] HTTP {resp.status_code}')
             return None
@@ -77,24 +82,20 @@ def poll_job():
         return None
 
 
-def update_status(job_id, status):
-    """Update job status on tuls."""
-    try:
-        requests.put(
-            f'{TULS_API}/api/audio/{job_id}/status',
-            headers=HEADERS, json={'status': status}, timeout=10,
-        )
-    except Exception as e:
-        print(f'[status] Error: {e}')
-
-
-def download_audio(job):
-    """Download audio file from tuls, return local path."""
-    url = f'{TULS_API}{job["download_url"]}'
+def download_file(job):
+    """Download file attached to a job, return local path."""
+    # Build download URL from job input_data or default pattern
+    download_url = f'/api/worker/jobs/{job["id"]}/download/audio'
+    url = f'{TULS_API}{download_url}'
     resp = requests.get(url, headers=HEADERS, timeout=300, stream=True)
     resp.raise_for_status()
 
-    suffix = os.path.splitext(job.get('original_filename', 'audio.mp3'))[1]
+    suffix = '.mp3'  # default
+    cd = resp.headers.get('Content-Disposition', '')
+    if 'filename=' in cd:
+        fname = cd.split('filename=')[-1].strip('"')
+        suffix = os.path.splitext(fname)[1] or suffix
+
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     for chunk in resp.iter_content(chunk_size=8192):
         tmp.write(chunk)
@@ -102,17 +103,18 @@ def download_audio(job):
     return tmp.name
 
 
-def transcribe(audio_path):
+def transcribe(audio_path, language='fr'):
     """Run WhisperX transcription with diarization. Returns (transcript_text, duration_seconds)."""
     output_dir = tempfile.mkdtemp()
 
+    wrapper = os.path.join(os.path.dirname(__file__), 'whisperx_wrapper.py')
     cmd = [
-        sys.executable, '-m', 'whisperx',
+        sys.executable, wrapper,
         audio_path,
         '--model', 'large-v3',
         '--output_dir', output_dir,
         '--output_format', 'json',
-        '--language', 'fr',
+        '--language', language,
         '--compute_type', 'float16',
     ]
     if HF_TOKEN:
@@ -127,7 +129,6 @@ def transcribe(audio_path):
     base = os.path.splitext(os.path.basename(audio_path))[0]
     json_path = os.path.join(output_dir, f'{base}.json')
     if not os.path.exists(json_path):
-        # Try finding any json in output
         for f in os.listdir(output_dir):
             if f.endswith('.json'):
                 json_path = os.path.join(output_dir, f)
@@ -159,35 +160,18 @@ def transcribe(audio_path):
     return transcript, duration
 
 
-def summarize(transcript):
-    """Summarize transcript using Claude API."""
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
-    message = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=4096,
-        messages=[{
-            'role': 'user',
-            'content': f'{SUMMARY_PROMPT}\n\n---\n\nHere is the transcript:\n\n{transcript}',
-        }],
-    )
-    return message.content[0].text
-
-
-def push_result(job_id, transcript=None, summary=None, duration_seconds=None, error=None):
+def push_result(job_id, output_data=None, error=None):
     """Push results back to tuls API with retries."""
     payload = {}
     if error:
         payload['error'] = str(error)
     else:
-        payload['transcript'] = transcript
-        payload['summary'] = summary
-        payload['duration_seconds'] = duration_seconds
+        payload['output_data'] = output_data
 
     for attempt in range(5):
         try:
             resp = requests.put(
-                f'{TULS_API}/api/audio/{job_id}/result',
+                f'{TULS_API}/api/worker/jobs/{job_id}/result',
                 headers=HEADERS, json=payload, timeout=30,
             )
             print(f'[result] {resp.status_code}: {resp.json()}')
@@ -195,7 +179,7 @@ def push_result(job_id, transcript=None, summary=None, duration_seconds=None, er
                 return
         except Exception as e:
             print(f'[result] Attempt {attempt + 1}/5 failed: {e}')
-        time.sleep(2 ** attempt)  # 1s, 2s, 4s, 8s, 16s
+        time.sleep(2 ** attempt)
 
     print(f'[result] FAILED after 5 attempts for job {job_id}')
 
@@ -225,47 +209,46 @@ def shutdown_self():
 
 
 def process_job(job):
-    """Process a single job: download → transcribe → summarize → push."""
+    """Process a single job using the appropriate handler."""
     job_id = job['id']
-    audio_path = None
+    job_type = job['type']
+    handler = HANDLERS.get(job_type)
+
+    if not handler:
+        print(f'[job {job_id}] Unknown job type: {job_type}')
+        push_result(job_id, error=f'Unknown job type: {job_type}')
+        return
 
     try:
-        print(f'[job {job_id}] Downloading audio...')
-        audio_path = download_audio(job)
-        print(f'[job {job_id}] Downloaded: {audio_path}')
-
-        print(f'[job {job_id}] Transcribing...')
-        transcript, duration = transcribe(audio_path)
-        print(f'[job {job_id}] Transcribed: {len(transcript)} chars, {duration:.1f}s')
-
-        update_status(job_id, 'summarizing')
-
-        print(f'[job {job_id}] Summarizing...')
-        summary = summarize(transcript)
-        print(f'[job {job_id}] Summary: {len(summary)} chars')
-
-        push_result(job_id, transcript=transcript, summary=summary, duration_seconds=duration)
-
+        print(f'[job {job_id}] Processing {job_type}...')
+        output_data = handler(job)
+        print(f'[job {job_id}] Done: {list(output_data.keys())}')
+        push_result(job_id, output_data=output_data)
     except Exception as e:
         print(f'[job {job_id}] Error: {e}')
         push_result(job_id, error=str(e))
 
-    finally:
-        if audio_path and os.path.exists(audio_path):
-            os.remove(audio_path)
+
+def touch_heartbeat():
+    """Write current timestamp to heartbeat file for cron idle detection."""
+    with open(HEARTBEAT_FILE, 'w') as f:
+        f.write(str(time.time()))
 
 
 def main():
     """Main worker loop: poll for jobs, process, shutdown after idle timeout."""
     print(f'[worker] Starting. API={TULS_API}, shutdown after {IDLE_SHUTDOWN_MINUTES}min idle')
     last_job_time = time.time()
+    touch_heartbeat()
 
     while True:
         job = poll_job()
 
         if job:
             last_job_time = time.time()
+            touch_heartbeat()
             process_job(job)
+            touch_heartbeat()
         else:
             idle_minutes = (time.time() - last_job_time) / 60
             if idle_minutes >= IDLE_SHUTDOWN_MINUTES:

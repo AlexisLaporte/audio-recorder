@@ -1,6 +1,6 @@
 # audio-recorder
 
-CLI pour enregistrer des réunions, transcrire (WhisperX) et résumer (Claude).
+CLI pour enregistrer des réunions et transcrire (WhisperX avec diarization).
 
 ## Installation
 
@@ -12,7 +12,7 @@ Quand l'utilisateur demande d'installer ou setup, suis ces étapes :
 ./install.sh
 ```
 
-Ça installe le script et vérifie les dépendances (ffmpeg, whisperx).
+Ça crée un symlink dans `~/.local/bin/` et vérifie les dépendances (ffmpeg, whisperx). Les libs sont chargées directement depuis le repo.
 
 ### 2. HuggingFace Token
 
@@ -23,8 +23,9 @@ WhisperX utilise pyannote pour identifier les speakers. Il faut un token Hugging
 1. Créer un compte sur https://huggingface.co si pas déjà fait
 2. Aller sur https://huggingface.co/settings/tokens
 3. Créer un token (Read access suffit)
-4. Accepter les conditions sur ces 2 pages (bouton "Agree") :
+4. Accepter les conditions sur ces pages (bouton "Agree") :
    - https://huggingface.co/pyannote/speaker-diarization-3.1
+   - https://huggingface.co/pyannote/speaker-diarization-community-1
    - https://huggingface.co/pyannote/segmentation-3.0
 5. Lancer `audio-recorder setup` et coller le token
 
@@ -36,8 +37,6 @@ Pour capturer l'audio système (pas seulement le micro), installer :
 brew install --cask background-music
 ```
 
-Alternative : `brew install blackhole-2ch` (nécessite config Audio MIDI Setup).
-
 ### 4. Test
 
 ```bash
@@ -48,46 +47,21 @@ audio-recorder stop --only  # Stop sans processing pour tester
 
 ## Utilisation
 
-### Enregistrer
-
 ```bash
 audio-recorder start              # Démarre l'enregistrement
-audio-recorder stop               # Stop + transcription + lance Claude interactif
+audio-recorder stop               # Stop → prompt transcription → prompt nb speakers → transcrit
 audio-recorder stop --only        # Stop sans processing
 audio-recorder status             # Durée en cours
 audio-recorder list               # Liste les enregistrements
+audio-recorder transcribe [nom]   # Re-transcrire un enregistrement
+audio-recorder transcribe /path   # Transcrire un fichier audio/vidéo (extraction auto)
 ```
 
-### Synthèse interactive
+Après `stop`, le CLI demande interactivement :
+1. **Transcrire maintenant ? [Y/n]** — n pour arrêter là
+2. **Combien de speakers ? [auto]** — Enter pour auto-detect, ou un nombre
 
-Après transcription, le script demande "Demander contexte à Claude ? [Y/n]" puis lance Claude en mode interactif depuis `~/Recordings/`.
-
-- **Y (défaut)** : Claude demande d'abord le contexte (client, projet) avant de synthétiser
-- **n** : Claude synthétise directement sans poser de question
-
-Claude peut ensuite :
-1. Chercher le dossier CRM correspondant dans `CONTEXT_BASE_DIR`
-2. Générer un résumé structuré
-3. Mettre à jour le CRM si pertinent
-
-### Transcrire un fichier existant
-
-L'outil peut transcrire n'importe quel fichier audio/vidéo (mp3, mp4, wav, etc.) :
-
-```bash
-audio-recorder transcribe /chemin/vers/fichier.mp4
-audio-recorder transcribe ~/Téléchargements/meeting.mp3
-```
-
-Le transcript est créé dans le même dossier que le fichier source (`fichier_transcript.txt`).
-
-### Re-traiter un enregistrement
-
-```bash
-audio-recorder transcribe [nom]   # Re-transcrire
-audio-recorder summarize [nom]    # Lance Claude pour synthèse
-audio-recorder summarize -n [nom] # Synthèse sans demander contexte
-```
+Les transcripts sont dans `~/Recordings/recording_YYYYMMDD_HHMMSS/transcript.txt`.
 
 ## Configuration
 
@@ -95,10 +69,8 @@ audio-recorder summarize -n [nom] # Synthèse sans demander contexte
 audio-recorder setup
 ```
 
-Options :
 - `HF_TOKEN` : Token HuggingFace pour WhisperX
 - `RECORDINGS_DIR` : Dossier des enregistrements (défaut: `~/Recordings`)
-- `CONTEXT_BASE_DIR` : Dossier de base pour le contexte CRM/projets (défaut: `$HOME`)
 
 ## Structure
 
@@ -106,9 +78,8 @@ Options :
 lib/
 ├── config.sh      # Configuration
 ├── utils.sh       # Helpers (colors, spinner, notify)
-├── audio.sh       # Enregistrement (ffmpeg)
-├── transcribe.sh  # Transcription (whisperx)
-└── summarize.sh   # Résumé (claude)
+├── audio.sh       # Enregistrement (ffmpeg) + flow stop interactif
+└── transcribe.sh  # Transcription (whisperx, supporte --min/max_speakers)
 ```
 
 ## Dev

@@ -5,7 +5,6 @@ set -e
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
-LIB_DIR="$HOME/.local/lib/audio-recorder"
 COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
 
 OS="$(uname -s)"
@@ -15,12 +14,9 @@ echo ""
 
 # Create directories
 mkdir -p "$BIN_DIR"
-mkdir -p "$LIB_DIR"
 mkdir -p "$COMPLETION_DIR"
 
-# Copy lib modules
-cp -r "$REPO_DIR/lib/"* "$LIB_DIR/"
-echo "[OK] Lib modules installed to $LIB_DIR"
+echo "[OK] Lib modules loaded from repo ($REPO_DIR/lib/)"
 
 # Symlink binary
 ln -sf "$REPO_DIR/audio-recorder" "$BIN_DIR/audio-recorder"
