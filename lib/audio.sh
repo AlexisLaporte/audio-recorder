@@ -23,6 +23,55 @@ get_sources() {
     esac
 }
 
+ensure_mic_active() {
+    # Unmute mic if muted
+    local muted
+    muted=$(pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null | awk '{print $2}')
+    if [ "$muted" = "oui" ] || [ "$muted" = "yes" ]; then
+        pactl set-source-mute @DEFAULT_SOURCE@ 0
+        warn "Mic was muted — auto-unmuted"
+    fi
+
+    # Ensure volume is at least 50%
+    local vol_pct
+    vol_pct=$(pactl get-source-volume @DEFAULT_SOURCE@ 2>/dev/null | grep -oP '\d+%' | head -1 | tr -d '%')
+    if [ -n "$vol_pct" ] && [ "$vol_pct" -lt 50 ]; then
+        pactl set-source-volume @DEFAULT_SOURCE@ 100%
+        warn "Mic volume was ${vol_pct}% — set to 100%"
+    fi
+}
+
+check_audio_volume() {
+    local file="$1"
+    local duration="${2:-2}"
+    local test_file
+    test_file=$(mktemp /tmp/audio-test-XXXXX.wav)
+    # Sample last N seconds of the file
+    ffmpeg -sseof "-${duration}" -i "$file" -t "$duration" -y "$test_file" &>/dev/null
+    local volume
+    volume=$(ffmpeg -i "$test_file" -af volumedetect -f null /dev/null 2>&1 | grep mean_volume | awk '{print $5}')
+    rm -f "$test_file"
+    echo "${volume:--91.0}"
+}
+
+audio_watchdog() {
+    local audio_file="$1"
+    local pid_file="$2"
+    local check_interval=120  # 2 minutes
+
+    sleep "$check_interval"
+    while [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; do
+        local vol
+        vol=$(check_audio_volume "$audio_file" 5)
+        local vol_int=${vol%%.*}
+        if [ "$vol_int" -lt -60 ]; then
+            notify "⚠️ Audio may be empty" "Monitor volume: ${vol} dB — check your audio source"
+            warn "Audio seems empty (${vol} dB) — check your audio source!"
+        fi
+        sleep "$check_interval"
+    done
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Recording
 # ─────────────────────────────────────────────────────────────────────────────
@@ -38,6 +87,10 @@ cmd_start() {
     fi
 
     get_sources
+
+    if [ "$OS" != "Darwin" ]; then
+        ensure_mic_active
+    fi
 
     local name folder
     name="recording_$(date +%Y%m%d_%H%M%S)"
@@ -70,12 +123,36 @@ cmd_start() {
 
     echo $! > "$PID_FILE"
 
+    # Detect audio mode
+    local audio_mode sink_name mic_name
+    case "$OS" in
+        Darwin) sink_name="AVFoundation :$MONITOR"; mic_name="AVFoundation :$MIC"; audio_mode="macOS" ;;
+        *)
+            sink_name=$(pactl get-default-sink)
+            mic_name=$(pactl get-default-source)
+            if echo "$sink_name" | grep -qi "bluez"; then
+                audio_mode="🎧 Bluetooth"
+            else
+                audio_mode="🔊 Speakers + Mic"
+            fi
+            ;;
+    esac
+
     echo ""
-    echo -e "  ${RED}●${NC} ${BOLD}Recording${NC}"
+    echo -e "  ${RED}●${NC} ${BOLD}Recording${NC}  ${YELLOW}${audio_mode}${NC}"
     echo -e "  ${DIM}$name${NC}"
+    echo -e "  ${DIM}⏎ ${sink_name}${NC}"
+    echo -e "  ${DIM}⏎ ${mic_name}${NC}"
     echo ""
 
     notify "Recording started" "$name"
+
+    # Background watchdog (Linux only)
+    if [ "$OS" != "Darwin" ]; then
+        audio_watchdog "$folder/audio.mp3" "$PID_FILE" &
+        echo $! > "/tmp/audio-recorder-watchdog.pid"
+        disown
+    fi
 }
 
 cmd_stop() {
@@ -93,6 +170,10 @@ cmd_stop() {
         error "No recording in progress"
         return 1
     fi
+
+    # Stop watchdog
+    [ -f "/tmp/audio-recorder-watchdog.pid" ] && kill "$(cat "/tmp/audio-recorder-watchdog.pid")" 2>/dev/null
+    rm -f "/tmp/audio-recorder-watchdog.pid"
 
     # Stop ffmpeg
     kill "$(cat "$PID_FILE")" 2>/dev/null

@@ -21,6 +21,13 @@ cmd_summarize() {
         return 1
     fi
 
+    local line_count
+    line_count=$(wc -l < "$transcript")
+    if [ "$line_count" -lt 2 ]; then
+        error "Transcript too short ($line_count lines) — audio may be empty"
+        return 1
+    fi
+
     local summary="$folder/summary.md"
 
     # Step 1: Generate minutes
@@ -47,9 +54,14 @@ $(cat "$transcript")" > "$summary" 2>/dev/null
     date_prefix=$(basename "$folder" | grep -oP '\d{8}')
 
     local new_name
-    new_name=$(CLAUDECODE= claude -p "À partir de ce résumé, propose UN nom de dossier court et descriptif en snake_case (max 40 chars, sans date). Réponds UNIQUEMENT le nom, rien d'autre.
+    new_name=$(CLAUDECODE= claude -p "À partir de ce résumé, propose UN nom de dossier court et descriptif en snake_case (max 40 chars, sans date, sans accents, uniquement [a-z0-9_]). Réponds UNIQUEMENT le nom, rien d'autre. Exemple: reunion_client_onboarding
 
-$(cat "$summary")" 2>/dev/null | tr -d '[:space:]')
+$(cat "$summary")" 2>/dev/null | tr -d '[:space:]' | sed 's/[^a-z0-9_]//g')
+
+    if [ ${#new_name} -gt 50 ] || [ -z "$new_name" ]; then
+        warn "Invalid folder name generated, skipping rename"
+        new_name=""
+    fi
 
     if [ -n "$new_name" ] && [ -n "$date_prefix" ]; then
         local new_folder="$RECORDINGS_DIR/${date_prefix}_${new_name}"

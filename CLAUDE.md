@@ -81,8 +81,16 @@ lib/
 
 ## Audio source detection
 
-- **Linux** : utilise `pactl get-default-sink/source` (suit le device actif, BT inclus)
+- **Linux** : `pactl get-default-sink/source` (suit le device actif, BT inclus)
 - **macOS** : AVFoundation, préfère Background Music pour le system audio
+- Au start : affiche le mode (`🎧 Bluetooth` ou `🔊 Speakers + Mic`) + noms des devices
+- Auto-unmute : si le mic est muté ou volume < 50%, corrige automatiquement au start
+- **Watchdog** : toutes les 2 min, vérifie le volume du fichier audio en cours. Si < -60dB, envoie une notification desktop
+
+## Garde-fous
+
+- `summarize` refuse de traiter un transcript < 2 lignes
+- Le rename de dossier est contraint : `[a-z0-9_]` uniquement, max 50 chars, sinon skip
 
 ## Dev
 
