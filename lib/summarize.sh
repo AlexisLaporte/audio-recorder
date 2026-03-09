@@ -7,19 +7,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 cmd_summarize() {
-    local folder=""
-    local no_context=false
+    local folder="$1"
 
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --no-context|-n) no_context=true; shift ;;
-            *) folder="$1"; shift ;;
-        esac
-    done
-
-    # Default to latest recording (directories only)
+    # Default to latest recording
     if [ -z "$folder" ]; then
-        folder=$(find "$RECORDINGS_DIR" -maxdepth 1 -type d -name "recording_*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+        folder=$(find "$RECORDINGS_DIR" -maxdepth 1 -type d -name "*recording*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
     fi
     [[ ! "$folder" == /* ]] && folder="$RECORDINGS_DIR/$folder"
 
@@ -29,81 +21,43 @@ cmd_summarize() {
         return 1
     fi
 
-    # Ensure CLAUDE.md exists in recordings dir
-    ensure_recordings_claude_md
+    local summary="$folder/summary.md"
 
-    local folder_name
-    folder_name=$(basename "$folder")
+    # Step 1: Generate minutes
+    info "Generating minutes with Claude..."
 
-    # Build prompt for Claude
-    local prompt
-    if [ "$no_context" = true ]; then
-        prompt="Lis $folder_name/transcript.txt et génère un résumé structuré (highlights, résumé, notes, actions). Écris-le dans $folder_name/summary.md puis propose un nom descriptif pour renommer le dossier."
-    else
-        prompt="Tu dois synthétiser l'enregistrement dans $folder_name/transcript.txt.
+    local prompt_file="$LIB_DIR/prompt_minutes.md"
+    local system_prompt
+    system_prompt=$(cat "$prompt_file")
 
-Étape 1: Demande-moi le contexte (client/projet, type de réunion, participants si connus).
-Étape 2: Après ma réponse, lis le transcript et cherche le dossier CRM correspondant si pertinent.
-Étape 3: Génère un résumé structuré et écris-le dans $folder_name/summary.md.
-Étape 4: Propose un nom descriptif pour renommer le dossier.
+    CLAUDECODE= claude -p --system-prompt "$system_prompt" "Voici la transcription :
 
-Commence par me demander le contexte."
+$(cat "$transcript")" > "$summary" 2>/dev/null
+    if [ ! -s "$summary" ]; then
+        error "Claude failed to generate summary"
+        rm -f "$summary"
+        return 1
     fi
+    success "Summary: $summary"
 
-    info "Lancement de Claude pour la synthèse..."
-    echo ""
+    # Step 2: Rename folder
+    info "Generating folder name..."
 
-    # Launch Claude interactively from recordings dir
-    cd "$RECORDINGS_DIR" && claude --add-dir "${CONTEXT_BASE_DIR:-/data/alexis/pro}" "$prompt"
-}
+    local date_prefix
+    date_prefix=$(basename "$folder" | grep -oP '\d{8}')
 
-# Ensure CLAUDE.md exists in recordings directory
-ensure_recordings_claude_md() {
-    local claude_md="$RECORDINGS_DIR/CLAUDE.md"
-    [ -f "$claude_md" ] && return
+    local new_name
+    new_name=$(CLAUDECODE= claude -p "À partir de ce résumé, propose UN nom de dossier court et descriptif en snake_case (max 40 chars, sans date). Réponds UNIQUEMENT le nom, rien d'autre.
 
-    cat > "$claude_md" << 'EOF'
-# Recordings - Audio Recorder
+$(cat "$summary")" 2>/dev/null | tr -d '[:space:]')
 
-Ce dossier contient les enregistrements audio transcrits.
-
-## Structure d'un enregistrement
-
-Chaque sous-dossier contient :
-- `audio.mp3` - L'enregistrement audio
-- `transcript.txt` - La transcription (WhisperX avec diarization)
-- `summary.md` - Le résumé (à créer)
-
-## Instructions de synthèse
-
-Quand on te demande de synthétiser un enregistrement :
-
-1. **Lis le transcript** dans le dossier indiqué
-2. **Demande le contexte** si pas fourni (client, projet, type de réunion)
-3. **Cherche le dossier CRM** correspondant dans `/data/alexis/pro/crm/` pour enrichir le contexte
-4. **Génère un résumé structuré** avec :
-   - Titre descriptif
-   - Highlights (3-5 points clés)
-   - Résumé (2-3 paragraphes)
-   - Notes condensées du flux de discussion
-   - Actions à faire (si mentionnées)
-5. **Écris le résumé** dans `summary.md` du dossier de l'enregistrement
-6. **Propose un nom** descriptif pour renommer le dossier (snake_case, max 40 chars)
-7. **Mets à jour le CRM** si pertinent (créer/màj fiche client, CR de réunion)
-
-## Dossier CRM
-
-Le CRM est dans `/data/alexis/pro/crm/` avec la structure :
-- `0-cold/` - Prospects froids
-- `1-outreach/` - En cours de contact
-- `2-warm/` - En discussion
-- `3-negotiation/` - En négociation
-- `clients/` - Clients actifs
-
-Chaque dossier client contient des fiches `.md` et des CR de réunions.
-EOF
-
-    success "Created $claude_md"
+    if [ -n "$new_name" ] && [ -n "$date_prefix" ]; then
+        local new_folder="$RECORDINGS_DIR/${date_prefix}_${new_name}"
+        if [ ! -d "$new_folder" ] && [ "$folder" != "$new_folder" ]; then
+            mv "$folder" "$new_folder"
+            success "Renamed: $(basename "$new_folder")"
+        fi
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

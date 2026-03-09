@@ -48,6 +48,12 @@ setup() {
     read -rp "Recordings directory [$RECORDINGS_DIR]: " new_dir
     [ -n "$new_dir" ] && RECORDINGS_DIR="${new_dir/#\~/$HOME}"
 
+    # Whisper model
+    local current_model="${WHISPER_MODEL:-large-v3}"
+    read -rp "Whisper model (tiny/base/small/medium/large-v2/large-v3) [$current_model]: " new_model
+    [ -n "$new_model" ] && WHISPER_MODEL="$new_model"
+    [ -z "$WHISPER_MODEL" ] && WHISPER_MODEL="$current_model"
+
     # Context base directory (for CRM/projects)
     local current_context="${CONTEXT_BASE_DIR:-$HOME}"
     read -rp "Context base directory [$current_context]: " new_context
@@ -58,6 +64,7 @@ setup() {
     cat > "$CONFIG_FILE" << EOF
 HF_TOKEN="$HF_TOKEN"
 RECORDINGS_DIR="$RECORDINGS_DIR"
+WHISPER_MODEL="$WHISPER_MODEL"
 CONTEXT_BASE_DIR="$CONTEXT_BASE_DIR"
 EOF
     chmod 600 "$CONFIG_FILE"

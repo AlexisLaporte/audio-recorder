@@ -17,10 +17,8 @@ get_sources() {
             [ -z "$MIC" ] && MIC="0"
             ;;
         *)
-            MONITOR=$(pactl list short sources | grep "monitor" | grep -v "SUSPENDED" | head -1 | cut -f2)
-            MIC=$(pactl list short sources | grep "input" | grep -v "SUSPENDED" | head -1 | cut -f2)
-            [ -z "$MONITOR" ] && MONITOR=$(pactl list short sources | grep "monitor" | head -1 | cut -f2)
-            [ -z "$MIC" ] && MIC=$(pactl list short sources | grep "input" | head -1 | cut -f2)
+            MONITOR="$(pactl get-default-sink).monitor"
+            MIC="$(pactl get-default-source)"
             ;;
     esac
 }
@@ -132,7 +130,9 @@ cmd_stop() {
         echo -e "${BOLD}Processing...${NC}"
         echo ""
 
-        cmd_transcribe "$folder" "" "$num_speakers"
+        if cmd_transcribe "$folder" "" "$num_speakers"; then
+            cmd_summarize "$folder"
+        fi
     fi
 }
 

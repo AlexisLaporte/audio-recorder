@@ -13,7 +13,7 @@ cmd_transcribe() {
     fi
 
     local input="$1"
-    local model="${2:-small}"
+    local model="${2:-${WHISPER_MODEL:-large-v3}}"
     local num_speakers="$3"
     local audio=""
     local output_dir=""
@@ -88,9 +88,7 @@ cmd_transcribe() {
 
     rm -f "$progress_file" 2>/dev/null
 
-    # Cleanup other formats
-    rm -f "$output_dir/$basename_noext".{json,srt,tsv,vtt} 2>/dev/null
-
+    local whisper_json="$output_dir/$basename_noext.json"
     local whisper_output="$output_dir/$basename_noext.txt"
     local transcript="$output_dir/transcript.txt"
 
@@ -99,15 +97,34 @@ cmd_transcribe() {
         transcript="$output_dir/${basename_noext}_transcript.txt"
     fi
 
-    if [ -f "$whisper_output" ]; then
-        # Only rename if different
+    # Format transcript from JSON (has timestamps + speakers)
+    if [ -f "$whisper_json" ]; then
+        python3 -c "
+import json, sys
+with open('$whisper_json') as f:
+    data = json.load(f)
+for seg in data.get('segments', []):
+    start = int(seg.get('start', 0))
+    speaker = seg.get('speaker', 'UNKNOWN')
+    text = seg.get('text', '').strip()
+    if not text:
+        continue
+    mm, ss = divmod(start, 60)
+    print(f'[{mm:02d}:{ss:02d}] {speaker}: {text}')
+" > "$transcript"
+        rm -f "$whisper_json"
+        rm -f "$whisper_output" 2>/dev/null
+    elif [ -f "$whisper_output" ]; then
         if [ "$whisper_output" != "$transcript" ]; then
             mv "$whisper_output" "$transcript"
         fi
-        success "Transcript: $transcript"
-        return 0
     else
         error "Transcription failed"
         return 1
     fi
+
+    # Cleanup other formats
+    rm -f "$output_dir/$basename_noext".{srt,tsv,vtt} 2>/dev/null
+
+    success "Transcript: $transcript"
 }
