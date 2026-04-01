@@ -8,10 +8,18 @@
 
 cmd_summarize() {
     local folder="$1"
+    shift || true
+    local comment=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --comment) comment="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
 
     # Default to latest recording
     if [ -z "$folder" ]; then
-        folder=$(find "$RECORDINGS_DIR" -maxdepth 1 -type d -name "*recording*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+        folder=$(latest_recording_dir)
     fi
     [[ ! "$folder" == /* ]] && folder="$RECORDINGS_DIR/$folder"
 
@@ -37,9 +45,15 @@ cmd_summarize() {
     local system_prompt
     system_prompt=$(cat "$prompt_file")
 
-    CLAUDECODE= claude -p --system-prompt "$system_prompt" "Voici la transcription :
+    local user_prompt
+    user_prompt="Voici la transcription :
 
-$(cat "$transcript")" > "$summary" 2>/dev/null
+$(cat "$transcript")"
+    [ -n "$comment" ] && user_prompt="$user_prompt
+
+Contexte additionnel : $comment"
+
+    env CLAUDECODE= claude -p --system-prompt "$system_prompt" "$user_prompt" > "$summary" 2>/dev/null
     if [ ! -s "$summary" ]; then
         error "Claude failed to generate summary"
         rm -f "$summary"
@@ -54,7 +68,7 @@ $(cat "$transcript")" > "$summary" 2>/dev/null
     date_prefix=$(basename "$folder" | grep -oP '\d{8}')
 
     local new_name
-    new_name=$(CLAUDECODE= claude -p "À partir de ce résumé, propose UN nom de dossier court et descriptif en snake_case (max 40 chars, sans date, sans accents, uniquement [a-z0-9_]). Réponds UNIQUEMENT le nom, rien d'autre. Exemple: reunion_client_onboarding
+    new_name=$(env CLAUDECODE= claude -p "À partir de ce résumé, propose UN nom de dossier court et descriptif en snake_case (max 40 chars, sans date, sans accents, uniquement [a-z0-9_]). Réponds UNIQUEMENT le nom, rien d'autre. Exemple: reunion_client_onboarding
 
 $(cat "$summary")" 2>/dev/null | tr -d '[:space:]' | sed 's/[^a-z0-9_]//g')
 
@@ -104,7 +118,7 @@ cmd_open() {
     local folder="$1"
 
     if [ -z "$folder" ]; then
-        folder=$(find "$RECORDINGS_DIR" -maxdepth 1 -type d -name "recording_*" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+        folder=$(latest_recording_dir)
     fi
     [[ ! "$folder" == /* ]] && folder="$RECORDINGS_DIR/$folder"
 

@@ -64,3 +64,34 @@ notify() {
         *)      notify-send "$title" "$msg" -i audio-input-microphone 2>/dev/null ;;
     esac
 }
+
+latest_recording_dir() {
+    find "$RECORDINGS_DIR" -mindepth 1 -maxdepth 1 -type d \
+        \( -exec test -f "{}/audio.mp3" \; -o -exec test -f "{}/transcript.txt" \; -o -exec test -f "{}/summary.md" \; \) \
+        -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Help
+# ─────────────────────────────────────────────────────────────────────────────
+
+show_help() {
+    echo -e "${BOLD}audio-recorder${NC} - Record, transcribe & summarize"
+    echo ""
+    echo "Usage: audio-recorder <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  start                  Start recording"
+    echo "  stop [--only]          Stop & process (--only skips processing)"
+    echo "  stop --comment \"...\"   Stop with context for summary"
+    echo "  stop --yes             Stop & process without prompts"
+    echo "  stop --speakers N      Force speaker count during transcription"
+    echo "  status                 Show recording status"
+    echo "  transcribe [path]      Transcribe audio (folder or file)"
+    echo "  summarize [folder]     Generate AI summary"
+    echo "  push [folder]          Push to tuls.me (--with-audio to include mp3)"
+    echo "  list                   List recordings"
+    echo "  open [folder]          Open folder in file manager"
+    echo "  setup                  Configure settings"
+    echo ""
+}

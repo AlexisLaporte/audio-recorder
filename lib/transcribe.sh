@@ -21,7 +21,7 @@ cmd_transcribe() {
 
     # Default to latest recording
     if [ -z "$input" ]; then
-        input=$(ls -td "$RECORDINGS_DIR"/recording_* 2>/dev/null | head -1)
+        input=$(latest_recording_dir)
     fi
 
     # Check if input is a file or folder
@@ -63,20 +63,22 @@ cmd_transcribe() {
 
     # Run whisperx (write transcript lines to progress file in real-time)
     local progress_file="$output_dir/progress.txt"
+    local whisper_log="$output_dir/whisperx.log"
     : > "$progress_file"  # Clear/create progress file
+    : > "$whisper_log"
 
     local speaker_args=()
-    if [ -n "$num_speakers" ]; then
+    if [[ -n "$num_speakers" && "$num_speakers" =~ ^[0-9]+$ ]]; then
         speaker_args=(--min_speakers "$num_speakers" --max_speakers "$num_speakers")
     fi
 
-    PYTHONWARNINGS=ignore whisperx "$audio" \
+    if ! PYTHONWARNINGS=ignore whisperx "$audio" \
         --model "$model" \
         --diarize \
         --diarize_model "pyannote/speaker-diarization-3.1" \
         --hf_token "$HF_TOKEN" \
         "${speaker_args[@]}" \
-        --output_dir "$output_dir" 2>&1 | awk -v pf="$progress_file" '
+        --output_dir "$output_dir" 2>&1 | tee "$whisper_log" | awk -v pf="$progress_file" '
             /^Transcript:/ {
                 sub(/^Transcript: \[[^]]+\]  /, "")
                 print >> pf
@@ -84,7 +86,13 @@ cmd_transcribe() {
                 next
             }
             !/^\/|UserWarning|^$|^Traceback|^  File/ { print; fflush() }
-        ' || true
+        '
+    then
+        rm -f "$progress_file" 2>/dev/null
+        error "WhisperX failed. See log: $whisper_log"
+        tail -20 "$whisper_log" >&2
+        return 1
+    fi
 
     rm -f "$progress_file" 2>/dev/null
 
@@ -119,7 +127,7 @@ for seg in data.get('segments', []):
             mv "$whisper_output" "$transcript"
         fi
     else
-        error "Transcription failed"
+        error "Transcription failed. WhisperX produced no usable output. See log: $whisper_log"
         return 1
     fi
 

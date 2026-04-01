@@ -5,6 +5,8 @@
 # Audio sources
 # ─────────────────────────────────────────────────────────────────────────────
 
+BT_PROFILE_FILE="/tmp/audio-recorder-bt-profile"
+
 get_sources() {
     local devices
     case "$OS" in
@@ -17,27 +19,51 @@ get_sources() {
             [ -z "$MIC" ] && MIC="0"
             ;;
         *)
-            MONITOR="$(pactl get-default-sink).monitor"
+            local default_sink
+            default_sink=$(pactl get-default-sink)
+
+            if echo "$default_sink" | grep -qi "bluez"; then
+                # A2DP monitor doesn't capture in PipeWire.
+                # Switch to HFP: monitor works + BT mic available.
+                local bt_card
+                bt_card=$(pactl list cards short 2>/dev/null | grep bluez | cut -f2)
+                if [ -n "$bt_card" ]; then
+                    echo "$bt_card" > "$BT_PROFILE_FILE"
+                    pactl set-card-profile "$bt_card" headset-head-unit
+                    sleep 0.5
+                    # HFP sink may not be default — force it
+                    local bt_sink
+                    bt_sink=$(pactl list short sinks | grep bluez | cut -f2)
+                    if [ -n "$bt_sink" ]; then
+                        pactl set-default-sink "$bt_sink"
+                        default_sink="$bt_sink"
+                    fi
+                fi
+            fi
+
+            MONITOR="${default_sink}.monitor"
             MIC="$(pactl get-default-source)"
             ;;
     esac
 }
 
+cleanup_bt_profile() {
+    if [ ! -f "$BT_PROFILE_FILE" ]; then
+        return
+    fi
+    local bt_card
+    bt_card=$(cat "$BT_PROFILE_FILE")
+    pactl set-card-profile "$bt_card" a2dp-sink 2>/dev/null
+    rm -f "$BT_PROFILE_FILE"
+}
+
 ensure_mic_active() {
     # Unmute mic if muted
     local muted
-    muted=$(pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null | awk '{print $2}')
+    muted=$(pactl get-source-mute "$MIC" 2>/dev/null | awk '{print $2}')
     if [ "$muted" = "oui" ] || [ "$muted" = "yes" ]; then
-        pactl set-source-mute @DEFAULT_SOURCE@ 0
+        pactl set-source-mute "$MIC" 0
         warn "Mic was muted — auto-unmuted"
-    fi
-
-    # Ensure volume is at least 50%
-    local vol_pct
-    vol_pct=$(pactl get-source-volume @DEFAULT_SOURCE@ 2>/dev/null | grep -oP '\d+%' | head -1 | tr -d '%')
-    if [ -n "$vol_pct" ] && [ "$vol_pct" -lt 50 ]; then
-        pactl set-source-volume @DEFAULT_SOURCE@ 100%
-        warn "Mic volume was ${vol_pct}% — set to 100%"
     fi
 }
 
@@ -77,6 +103,7 @@ audio_watchdog() {
 # ─────────────────────────────────────────────────────────────────────────────
 
 is_recording() {
+    # shellcheck disable=SC2153  # PID_FILE comes from sourced config.sh
     [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
 }
 
@@ -105,7 +132,7 @@ cmd_start() {
         Darwin)
             if [ -n "$MONITOR" ]; then
                 ffmpeg -f avfoundation -i ":$MONITOR" -f avfoundation -i ":$MIC" \
-                    -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest[out]" \
+                    -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[out]" \
                     -map "[out]" -codec:a libmp3lame -q:a 2 \
                     "$folder/audio.mp3" &>/dev/null &
             else
@@ -115,7 +142,7 @@ cmd_start() {
             ;;
         *)
             ffmpeg -f pulse -i "$MONITOR" -f pulse -i "$MIC" \
-                -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest[out]" \
+                -filter_complex "[0:a]aresample=48000[sys];[1:a]aresample=48000[mic];[sys][mic]amix=inputs=2:duration=longest:normalize=0[mix];[mix]alimiter=limit=0.8[out]" \
                 -map "[out]" -codec:a libmp3lame -q:a 2 \
                 "$folder/audio.mp3" &>/dev/null &
             ;;
@@ -129,7 +156,7 @@ cmd_start() {
         Darwin) sink_name="AVFoundation :$MONITOR"; mic_name="AVFoundation :$MIC"; audio_mode="macOS" ;;
         *)
             sink_name=$(pactl get-default-sink)
-            mic_name=$(pactl get-default-source)
+            mic_name="$MIC"
             if echo "$sink_name" | grep -qi "bluez"; then
                 audio_mode="🎧 Bluetooth"
             else
@@ -157,14 +184,28 @@ cmd_start() {
 
 cmd_stop() {
     local process_audio=true
+    local comment=""
+    local ask_transcribe=true
+    local num_speakers=""
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --only) process_audio=false; shift ;;
+            --yes|--transcribe) ask_transcribe=false; shift ;;
+            --speakers)
+                num_speakers="$2"
+                shift 2
+                ;;
+            --comment) comment="$2"; shift 2 ;;
             *) shift ;;
         esac
     done
+
+    if [[ -n "$num_speakers" && ! "$num_speakers" =~ ^[0-9]+$ ]]; then
+        error "Invalid speaker count: $num_speakers"
+        return 1
+    fi
 
     if ! is_recording; then
         error "No recording in progress"
@@ -178,6 +219,9 @@ cmd_stop() {
     # Stop ffmpeg
     kill "$(cat "$PID_FILE")" 2>/dev/null
     rm -f "$PID_FILE"
+
+    # Restore A2DP profile if we switched to HFP
+    cleanup_bt_profile
 
     local name folder start_time
     name=$(cat "$NAME_FILE" 2>/dev/null)
@@ -198,21 +242,39 @@ cmd_stop() {
 
     # Process if requested
     if [ "$process_audio" = true ]; then
-        echo ""
-        read -rp "Transcrire maintenant ? [Y/n] " do_transcribe
-        if [[ "$do_transcribe" =~ ^[Nn] ]]; then
-            return 0
-        fi
+        if [ "$ask_transcribe" = true ]; then
+            if [ ! -t 0 ]; then
+                error "Stop is interactive by default. Use --yes to process or --only to skip processing."
+                return 1
+            fi
 
-        local num_speakers=""
-        read -rp "Combien de speakers ? [auto] " num_speakers
+            local do_transcribe
+            echo ""
+            read -rp "Transcrire maintenant ? [Y/n] " do_transcribe
+            if [[ "$do_transcribe" =~ ^[Nn] ]]; then
+                return 0
+            fi
+
+            if [ -z "$num_speakers" ]; then
+                read -rp "Combien de speakers ? [auto] " num_speakers
+                # Validate: must be a positive integer, otherwise auto
+                if [[ -n "$num_speakers" && ! "$num_speakers" =~ ^[0-9]+$ ]]; then
+                    warn "Invalid input '$num_speakers' — using auto-detect"
+                    num_speakers=""
+                fi
+            fi
+        fi
 
         echo ""
         echo -e "${BOLD}Processing...${NC}"
         echo ""
 
         if cmd_transcribe "$folder" "" "$num_speakers"; then
-            cmd_summarize "$folder"
+            if [ -n "$comment" ]; then
+                cmd_summarize "$folder" --comment "$comment"
+            else
+                cmd_summarize "$folder"
+            fi
         fi
     fi
 }
