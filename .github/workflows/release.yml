@@ -24,6 +24,7 @@ jobs:
           tar -czvf dist/audio-recorder-${{ steps.version.outputs.VERSION }}.tar.gz \
             --transform 's,^,audio-recorder/,' \
             audio-recorder \
+            lib/ \
             audio-recorder.bash-completion \
             claude-skill.md \
             install.sh \

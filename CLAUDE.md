@@ -47,6 +47,7 @@ audio-recorder list               # Liste les enregistrements
 audio-recorder transcribe [nom]   # Re-transcrire un enregistrement
 audio-recorder transcribe /path   # Transcrire un fichier audio/vidéo
 audio-recorder summarize [folder] # Générer minutes + renommer dossier
+audio-recorder push [folder]      # Pousser vers tuls.me (--with-audio pour inclure mp3)
 audio-recorder open [folder]      # Ouvrir le dossier
 audio-recorder setup              # Configurer
 ```
@@ -66,16 +67,19 @@ audio-recorder setup
 - `HF_TOKEN` : Token HuggingFace pour WhisperX
 - `RECORDINGS_DIR` : Dossier des enregistrements (défaut: `~/Recordings`)
 - `WHISPER_MODEL` : Modèle WhisperX (tiny/base/small/medium/large-v2/large-v3, défaut: `large-v3`)
+- `TULS_API_TOKEN` : Token API tuls.me pour `push` (généré sur https://tuls.me)
 
 ## Structure
 
 ```
+audio-recorder         # Point d'entrée (~40 lignes, source les libs)
 lib/
-├── config.sh      # Configuration + setup interactif
-├── utils.sh       # Helpers (colors, spinner, notify)
-├── audio.sh       # Enregistrement ffmpeg (pulse/avfoundation) + flow stop
+├── config.sh          # Configuration + setup interactif
+├── utils.sh           # Helpers (colors, spinner, notify, help)
+├── audio.sh           # Enregistrement ffmpeg (pulse/avfoundation) + flow stop
 ├── transcribe.sh      # Transcription WhisperX avec diarization
 ├── summarize.sh       # Minutes via claude -p + renommage dossier
+├── push.sh            # Push vers tuls.me API
 └── prompt_minutes.md  # System prompt pour la génération de minutes
 ```
 
@@ -91,6 +95,20 @@ lib/
 
 - `summarize` refuse de traiter un transcript < 2 lignes
 - Le rename de dossier est contraint : `[a-z0-9_]` uniquement, max 50 chars, sinon skip
+
+## API tuls.me
+
+Les recordings peuvent être poussés vers `audio-recorder-transcript.tuls.me` via `push` ou `oto audio push`.
+
+- `POST /api/audio/recordings` — créer un recording (transcript + summary + audio optionnel)
+- `GET /api/audio/history` — lister les recordings
+- `GET /api/audio/<id>` — détail avec transcript/summary
+- `DELETE /api/audio/<id>` — supprimer
+- `POST /api/audio/<id>/summarize` — déclencher résumé IA
+
+Auth : `Authorization: Bearer tuls_xxx`. Doc interactive : https://tuls.me/api/docs/
+
+Alternative CLI : `oto audio push/list/get/delete/summarize` (secret `TULS_API_TOKEN` dans `~/.otomata/secrets.env`)
 
 ## Dev
 

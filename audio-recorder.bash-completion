@@ -1,36 +1,50 @@
+#!/usr/bin/env bash
 # Bash completion for audio-recorder
 
 _audio_recorder() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
-    local prev="${COMP_WORDS[COMP_CWORD-1]}"
     local cmd="${COMP_WORDS[1]}"
-    local commands="start stop status transcribe summarize list open setup help"
+    local commands="start stop status transcribe summarize push list open setup help"
+    local folders
 
-    # Load config for RECORDINGS_DIR
-    local recordings_dir="$HOME/Recordings"
+    # shellcheck source=/dev/null
     [ -f "$HOME/.config/audio-recorder/config" ] && source "$HOME/.config/audio-recorder/config"
 
-    # First argument: command
-    if [ $COMP_CWORD -eq 1 ]; then
-        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+    local recordings_dir="${RECORDINGS_DIR:-$HOME/Recordings}"
+
+    if [ "$COMP_CWORD" -eq 1 ]; then
+        mapfile -t COMPREPLY < <(compgen -W "$commands" -- "$cur")
         return
     fi
 
-    # Second+ arguments based on command
     case "$cmd" in
         stop)
-            COMPREPLY=($(compgen -W "--only --comment" -- "$cur"))
+            mapfile -t COMPREPLY < <(compgen -W "--only --comment --yes --transcribe --speakers" -- "$cur")
             ;;
-        transcribe|summarize|open)
+        push)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--comment" -- "$cur"))
-            else
-                # List folders in recordings dir
-                if [ -d "$recordings_dir" ]; then
-                    local folders=$(ls -1 "$recordings_dir" 2>/dev/null)
-                    COMPREPLY=($(compgen -W "$folders" -- "$cur"))
-                fi
+                mapfile -t COMPREPLY < <(compgen -W "--with-audio" -- "$cur")
+            elif [ -d "$recordings_dir" ]; then
+                folders="$(ls -1 "$recordings_dir" 2>/dev/null)"
+                mapfile -t COMPREPLY < <(compgen -W "$folders" -- "$cur")
             fi
+            ;;
+        summarize)
+            if [[ "$cur" == -* ]]; then
+                mapfile -t COMPREPLY < <(compgen -W "--comment" -- "$cur")
+            elif [ -d "$recordings_dir" ]; then
+                folders="$(ls -1 "$recordings_dir" 2>/dev/null)"
+                mapfile -t COMPREPLY < <(compgen -W "$folders" -- "$cur")
+            fi
+            ;;
+        transcribe|open)
+            if [ -d "$recordings_dir" ]; then
+                folders="$(ls -1 "$recordings_dir" 2>/dev/null)"
+                mapfile -t COMPREPLY < <(compgen -W "$folders" -- "$cur")
+            fi
+            ;;
+        *)
+            COMPREPLY=()
             ;;
     esac
 }

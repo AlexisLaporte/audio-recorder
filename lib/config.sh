@@ -54,18 +54,18 @@ setup() {
     [ -n "$new_model" ] && WHISPER_MODEL="$new_model"
     [ -z "$WHISPER_MODEL" ] && WHISPER_MODEL="$current_model"
 
-    # Context base directory (for CRM/projects)
-    local current_context="${CONTEXT_BASE_DIR:-$HOME}"
-    read -rp "Context base directory [$current_context]: " new_context
-    [ -n "$new_context" ] && CONTEXT_BASE_DIR="${new_context/#\~/$HOME}"
-    [ -z "$CONTEXT_BASE_DIR" ] && CONTEXT_BASE_DIR="$current_context"
+    # Tuls API token
+    local current_tuls="${TULS_API_TOKEN:-(not set)}"
+    [ ${#current_tuls} -gt 20 ] && current_tuls="${current_tuls:0:10}...${current_tuls: -4}"
+    read -rp "Tuls API token (for push) [$current_tuls]: " new_tuls
+    [ -n "$new_tuls" ] && TULS_API_TOKEN="$new_tuls"
 
     # Save
     cat > "$CONFIG_FILE" << EOF
 HF_TOKEN="$HF_TOKEN"
 RECORDINGS_DIR="$RECORDINGS_DIR"
 WHISPER_MODEL="$WHISPER_MODEL"
-CONTEXT_BASE_DIR="$CONTEXT_BASE_DIR"
+TULS_API_TOKEN="$TULS_API_TOKEN"
 EOF
     chmod 600 "$CONFIG_FILE"
     mkdir -p "$RECORDINGS_DIR"
