@@ -187,12 +187,14 @@ cmd_stop() {
     local comment=""
     local ask_transcribe=true
     local num_speakers=""
+    local do_trim=false
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --only) process_audio=false; shift ;;
             --yes|--transcribe) ask_transcribe=false; shift ;;
+            --trim) do_trim=true; shift ;;
             --speakers)
                 num_speakers="$2"
                 shift 2
@@ -262,6 +264,15 @@ cmd_stop() {
                     warn "Invalid input '$num_speakers' — using auto-detect"
                     num_speakers=""
                 fi
+            fi
+        fi
+
+        # Trim if requested
+        if [ "$do_trim" = true ]; then
+            if [ "$ask_transcribe" = false ]; then
+                cmd_trim --yes "$folder"
+            else
+                cmd_trim "$folder"
             fi
         fi
 

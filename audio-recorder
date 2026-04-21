@@ -19,6 +19,8 @@ source "$LIB_DIR/utils.sh"
 source "$LIB_DIR/audio.sh"
 # shellcheck source=lib/transcribe.sh
 source "$LIB_DIR/transcribe.sh"
+# shellcheck source=lib/trim.sh
+source "$LIB_DIR/trim.sh"
 # shellcheck source=lib/summarize.sh
 source "$LIB_DIR/summarize.sh"
 # shellcheck source=lib/push.sh
@@ -36,6 +38,7 @@ case "$1" in
     status)     cmd_status ;;
     transcribe) shift; cmd_transcribe "$@" ;;
     summarize)  shift; cmd_summarize "$@" ;;
+    trim|cut)   shift; cmd_trim "$@" ;;
     push)       shift; cmd_push "$@" ;;
     list|ls)    cmd_list ;;
     open)       cmd_open "$2" ;;

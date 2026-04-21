@@ -53,6 +53,24 @@ $(cat "$transcript")"
 
 Contexte additionnel : $comment"
 
+    # Use CLAUDE.md from current directory as project context
+    local context_md=""
+    local search_dir="$PWD"
+    while [ "$search_dir" != "/" ]; do
+        if [ -f "$search_dir/CLAUDE.md" ]; then
+            context_md="$search_dir/CLAUDE.md"
+            break
+        fi
+        search_dir=$(dirname "$search_dir")
+    done
+    if [ -n "$context_md" ]; then
+        info "Project context: $context_md"
+        user_prompt="$user_prompt
+
+Contexte du projet (CLAUDE.md) :
+$(cat "$context_md")"
+    fi
+
     env CLAUDECODE= claude -p --system-prompt "$system_prompt" "$user_prompt" > "$summary" 2>/dev/null
     if [ ! -s "$summary" ]; then
         error "Claude failed to generate summary"

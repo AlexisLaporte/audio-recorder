@@ -42,8 +42,10 @@ audio-recorder stop --only  # Stop sans processing
 audio-recorder start              # Démarre l'enregistrement
 audio-recorder stop               # Stop → transcription → minutes → renommage dossier
 audio-recorder stop --only        # Stop sans processing
+audio-recorder stop --trim        # Stop → trim auto → transcription → minutes
 audio-recorder status             # Durée en cours
 audio-recorder list               # Liste les enregistrements
+audio-recorder trim [folder]      # Analyse silences → découpe auto (alias: cut)
 audio-recorder transcribe [nom]   # Re-transcrire un enregistrement
 audio-recorder transcribe /path   # Transcrire un fichier audio/vidéo
 audio-recorder summarize [folder] # Générer minutes + renommer dossier
@@ -53,10 +55,20 @@ audio-recorder setup              # Configurer
 ```
 
 ### Flow `stop`
-1. **Transcrire ? [Y/n]** → WhisperX transcription avec diarization
-2. **Combien de speakers ? [auto]** → auto-detect ou nombre
-3. **Minutes** → `claude -p` génère `summary.md` automatiquement
-4. **Renommage** → `claude -p` propose un nom descriptif, dossier renommé en `YYYYMMDD_nom`
+1. **Trim ?** → si `--trim`, analyse silences et découpe le trailing audio
+2. **Transcrire ? [Y/n]** → WhisperX transcription avec diarization
+3. **Combien de speakers ? [auto]** → auto-detect ou nombre
+4. **Minutes** → `claude -p` génère `summary.md` automatiquement
+5. **Renommage** → `claude -p` propose un nom descriptif, dossier renommé en `YYYYMMDD_nom`
+
+### Trim (analyse silences)
+- Détecte les silences >3s en un seul pass ffmpeg
+- Stratégie 1 : premier silence ≥10s (après 5 min), validé par densité avant/après
+- Stratégie 2 (fallback) : transition de densité (silences/5min augmente >1.5x la moyenne)
+- L'original est sauvegardé en `audio_full.mp3`
+
+### Contexte projet (CLAUDE.md)
+`summarize` cherche automatiquement un `CLAUDE.md` dans le répertoire courant (remonte les parents). Si trouvé, son contenu est passé à Claude comme contexte pour enrichir les minutes (noms d'équipe, terminologie, objectifs projet).
 
 ## Configuration
 
@@ -72,13 +84,14 @@ audio-recorder setup
 ## Structure
 
 ```
-audio-recorder         # Point d'entrée (~40 lignes, source les libs)
+audio-recorder         # Point d'entrée (~50 lignes, source les libs)
 lib/
 ├── config.sh          # Configuration + setup interactif
 ├── utils.sh           # Helpers (colors, spinner, notify, help)
 ├── audio.sh           # Enregistrement ffmpeg (pulse/avfoundation) + flow stop
+├── trim.sh            # Analyse silences + découpe auto (find_conversation_end)
 ├── transcribe.sh      # Transcription WhisperX avec diarization
-├── summarize.sh       # Minutes via claude -p + renommage dossier
+├── summarize.sh       # Minutes via claude -p + renommage dossier + contexte CLAUDE.md
 ├── push.sh            # Push vers tuls.me API
 └── prompt_minutes.md  # System prompt pour la génération de minutes
 ```
