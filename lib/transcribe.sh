@@ -12,6 +12,13 @@ cmd_transcribe() {
         return 1
     fi
 
+    if ! command -v whisperx &>/dev/null; then
+        error "whisperx not found in PATH. Re-run the installer:"
+        error "  cd $(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd) && ./install.sh"
+        error "Or install manually: uv tool install whisperx --python 3.12"
+        return 1
+    fi
+
     local input="$1"
     local model="${2:-${WHISPER_MODEL:-large-v3}}"
     local num_speakers="$3"

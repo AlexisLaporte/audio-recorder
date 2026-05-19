@@ -59,15 +59,21 @@ install_deps() {
             ;;
     esac
 
-    # WhisperX
+    # WhisperX (via uv on a pinned Python — its deps cap at Python <3.13,
+    # so we can't rely on the system Python on recent distros like Ubuntu 26.04).
     if ! command -v whisperx &>/dev/null; then
         echo "Installing whisperx..."
-        if command -v pipx &>/dev/null; then
-            pipx install whisperx
-        elif command -v pip &>/dev/null; then
-            pip install --user whisperx
+        if ! command -v uv &>/dev/null; then
+            echo "Installing uv (Python toolchain manager)..."
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            export PATH="$HOME/.local/bin:$PATH"
+        fi
+        if command -v uv &>/dev/null; then
+            uv tool install whisperx --python 3.12
         else
-            echo "[ERROR] Neither pipx nor pip found. Install whisperx manually."
+            echo "[ERROR] uv install failed. Install whisperx manually:"
+            echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
+            echo "  uv tool install whisperx --python 3.12"
         fi
     fi
 }
