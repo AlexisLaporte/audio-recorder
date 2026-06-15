@@ -1,66 +1,139 @@
 #!/bin/bash
 # audio-recorder installer
+#
+# Modes:
+#   ./install.sh            Install (copy payload to a stable location, then link a launcher).
+#                           Survives moving/deleting this checkout. Default — use for end users.
+#   ./install.sh --link     Dev install: symlink the launcher to THIS checkout (edits go live).
+#   ./install.sh --uninstall  Remove launcher, completion, skill and the installed payload.
+#                             Keeps your config (~/.config/audio-recorder) and recordings.
+#   -y, --yes               Assume "yes" to prompts (deps, Claude skill). For non-interactive installs.
 
 set -e
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
+LIBEXEC_DIR="$HOME/.local/share/audio-recorder"
 COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
+SKILL_DIR="$HOME/.claude/skills"
+SKILL_FILE="$SKILL_DIR/audio-recorder.md"
+RECORDINGS_DIR="$HOME/Recordings"
 
 OS="$(uname -s)"
 
-echo "=== audio-recorder installer ==="
+MODE="copy"        # copy | link
+DO_UNINSTALL=0
+ASSUME_YES=0
+
+# Payload that makes up a working install (relative to REPO_DIR).
+PAYLOAD=(audio-recorder lib audio-recorder.bash-completion claude-skill.md summarize-prompt.default.md)
+
+usage() {
+    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Args
+# ─────────────────────────────────────────────────────────────────────────────
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --link)      MODE="link" ;;
+        --copy)      MODE="copy" ;;
+        --uninstall) DO_UNINSTALL=1 ;;
+        -y|--yes)    ASSUME_YES=1 ;;
+        -h|--help)   usage; exit 0 ;;
+        *)           echo "Unknown option: $1"; echo; usage; exit 1 ;;
+    esac
+    shift
+done
+
+confirm() {
+    # confirm "prompt"  -> 0 if yes. Defaults to yes. Honors --yes / non-tty.
+    [ "$ASSUME_YES" = 1 ] && return 0
+    [ -t 0 ] || return 0
+    local reply
+    read -rp "$1 [Y/n] " reply
+    [[ ! "$reply" =~ ^[Nn] ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Uninstall
+# ─────────────────────────────────────────────────────────────────────────────
+
+if [ "$DO_UNINSTALL" = 1 ]; then
+    echo "=== audio-recorder uninstall ==="
+    rm -f "$BIN_DIR/audio-recorder"
+    rm -f "$COMPLETION_DIR/audio-recorder"
+    [ -L "$SKILL_FILE" ] && rm -f "$SKILL_FILE"
+    rm -rf "$LIBEXEC_DIR"
+    echo "[OK] Removed launcher, completion, skill and $LIBEXEC_DIR"
+    echo "[KEPT] Config (~/.config/audio-recorder) and recordings ($RECORDINGS_DIR)"
+    exit 0
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Install
+# ─────────────────────────────────────────────────────────────────────────────
+
+echo "=== audio-recorder installer (mode: $MODE) ==="
 echo ""
 
-# Create directories
-mkdir -p "$BIN_DIR"
-mkdir -p "$COMPLETION_DIR"
+mkdir -p "$BIN_DIR" "$COMPLETION_DIR"
 
-# Symlink binary
-ln -sf "$REPO_DIR/audio-recorder" "$BIN_DIR/audio-recorder"
-echo "[OK] Installed to $BIN_DIR/audio-recorder"
+if [ "$MODE" = "copy" ]; then
+    # Copy the payload to a stable location so the install survives this
+    # checkout being moved or deleted (and so the release tarball flow works).
+    rm -rf "$LIBEXEC_DIR"
+    mkdir -p "$LIBEXEC_DIR"
+    for item in "${PAYLOAD[@]}"; do
+        [ -e "$REPO_DIR/$item" ] && cp -R "$REPO_DIR/$item" "$LIBEXEC_DIR/"
+    done
+    SRC="$LIBEXEC_DIR"
+    echo "[OK] Payload copied to $LIBEXEC_DIR"
+else
+    SRC="$REPO_DIR"
+    echo "[OK] Linking to checkout $REPO_DIR (edits go live)"
+fi
 
-# Install bash completion
-ln -sf "$REPO_DIR/audio-recorder.bash-completion" "$COMPLETION_DIR/audio-recorder"
+# Launcher resolves its real path (readlink -f) to find lib/, so a symlink is fine in both modes.
+ln -sf "$SRC/audio-recorder" "$BIN_DIR/audio-recorder"
+echo "[OK] Launcher: $BIN_DIR/audio-recorder -> $SRC/audio-recorder"
+
+ln -sf "$SRC/audio-recorder.bash-completion" "$COMPLETION_DIR/audio-recorder"
 echo "[OK] Bash completion installed"
 
-# Copy default prompt template to Recordings
-RECORDINGS_DIR="$HOME/Recordings"
+# Default prompt template (data, never overwritten if customized)
 mkdir -p "$RECORDINGS_DIR"
-if [ ! -f "$RECORDINGS_DIR/summarize-prompt.md" ]; then
-    cp "$REPO_DIR/summarize-prompt.default.md" "$RECORDINGS_DIR/summarize-prompt.md" 2>/dev/null || true
-    [ -f "$RECORDINGS_DIR/summarize-prompt.md" ] && echo "[OK] Prompt template copied to $RECORDINGS_DIR/"
+if [ ! -f "$RECORDINGS_DIR/summarize-prompt.md" ] && [ -f "$SRC/summarize-prompt.default.md" ]; then
+    cp "$SRC/summarize-prompt.default.md" "$RECORDINGS_DIR/summarize-prompt.md"
+    echo "[OK] Prompt template copied to $RECORDINGS_DIR/"
 fi
 
-# Check if ~/.local/bin is in PATH
+# PATH check
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     echo ""
-    echo "[WARN] $BIN_DIR is not in your PATH"
-    echo "Add this to your ~/.bashrc or ~/.zshrc:"
+    echo "[WARN] $BIN_DIR is not in your PATH. Add to your ~/.bashrc or ~/.zshrc:"
     echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dependencies
+# ─────────────────────────────────────────────────────────────────────────────
 
 echo ""
 echo "=== Checking dependencies ==="
 
 install_deps() {
-    echo ""
-    read -p "Install missing dependencies? [Y/n] " confirm
-    [[ "$confirm" =~ ^[Nn] ]] && return
+    confirm "Install missing dependencies?" || return
 
     case "$OS" in
-        Darwin)
-            echo "Installing ffmpeg..."
-            brew install ffmpeg || true
-            ;;
-        *)
-            echo "Installing ffmpeg..."
-            sudo apt install -y ffmpeg || true
-            ;;
+        Darwin) echo "Installing ffmpeg..."; brew install ffmpeg || true ;;
+        *)      echo "Installing ffmpeg..."; sudo apt install -y ffmpeg || true ;;
     esac
 
-    # WhisperX (via uv on a pinned Python — its deps cap at Python <3.13,
-    # so we can't rely on the system Python on recent distros like Ubuntu 26.04).
+    # WhisperX via uv on a pinned Python — its deps cap at Python <3.13, so we
+    # can't rely on the system Python on recent distros (e.g. Ubuntu 26.04).
     if ! command -v whisperx &>/dev/null; then
         echo "Installing whisperx..."
         if ! command -v uv &>/dev/null; then
@@ -79,30 +152,12 @@ install_deps() {
 }
 
 MISSING=0
-
-if command -v ffmpeg &>/dev/null; then
-    echo "[OK] ffmpeg"
-else
-    echo "[MISSING] ffmpeg"
-    MISSING=1
-fi
-
-if command -v whisperx &>/dev/null; then
-    echo "[OK] whisperx"
-else
-    echo "[MISSING] whisperx"
-    MISSING=1
-fi
-
-if command -v claude &>/dev/null; then
-    echo "[OK] claude (for summarize)"
-else
-    echo "[OPTIONAL] claude CLI not found (needed for summarize command)"
-fi
+if command -v ffmpeg &>/dev/null; then echo "[OK] ffmpeg"; else echo "[MISSING] ffmpeg"; MISSING=1; fi
+if command -v whisperx &>/dev/null; then echo "[OK] whisperx"; else echo "[MISSING] whisperx"; MISSING=1; fi
+if command -v claude &>/dev/null; then echo "[OK] claude (for summarize)"; else echo "[OPTIONAL] claude CLI not found (needed for summarize command)"; fi
 
 [ $MISSING -eq 1 ] && install_deps
 
-# macOS: check for BlackHole
 if [ "$OS" = "Darwin" ]; then
     echo ""
     echo "=== macOS note ==="
@@ -111,26 +166,27 @@ if [ "$OS" = "Darwin" ]; then
     echo "Then set up a Multi-Output Device in Audio MIDI Setup."
 fi
 
-# Claude skill
+# ─────────────────────────────────────────────────────────────────────────────
+# Claude Code skill
+# ─────────────────────────────────────────────────────────────────────────────
+
 echo ""
 echo "=== Claude Code skill ==="
-SKILL_DIR="$HOME/.claude/skills"
-SKILL_FILE="$SKILL_DIR/audio-recorder.md"
-
 if [ -d "$HOME/.claude" ]; then
-    if [ -f "$SKILL_FILE" ]; then
+    if [ -L "$SKILL_FILE" ] || [ -f "$SKILL_FILE" ]; then
         echo "[OK] Claude skill already installed"
-    else
-        read -p "Install Claude Code skill? (lets Claude use audio-recorder) [Y/n] " confirm
-        if [[ ! "$confirm" =~ ^[Nn] ]]; then
-            mkdir -p "$SKILL_DIR"
-            ln -sf "$REPO_DIR/claude-skill.md" "$SKILL_FILE"
-            echo "[OK] Claude skill installed to $SKILL_FILE"
-        fi
+    elif confirm "Install Claude Code skill? (lets Claude use audio-recorder)"; then
+        mkdir -p "$SKILL_DIR"
+        ln -sf "$SRC/claude-skill.md" "$SKILL_FILE"
+        echo "[OK] Claude skill installed to $SKILL_FILE"
     fi
 else
     echo "[SKIP] ~/.claude not found (Claude Code not installed)"
 fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Done
+# ─────────────────────────────────────────────────────────────────────────────
 
 echo ""
 echo "=== Setup ==="

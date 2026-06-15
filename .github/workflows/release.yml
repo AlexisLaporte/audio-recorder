@@ -50,7 +50,9 @@ jobs:
           cd "$TMPDIR"
           curl -sL "https://github.com/$REPO/releases/download/$VERSION/audio-recorder-$VERSION.tar.gz" | tar xz
           cd audio-recorder
-          ./install.sh
+          # Default (copy) mode installs into ~/.local/share/audio-recorder, so it's
+          # safe to delete this temp checkout afterwards. -y for non-interactive.
+          ./install.sh -y
           cd /
           rm -rf "$TMPDIR"
 

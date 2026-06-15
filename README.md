@@ -15,6 +15,14 @@ cd audio-recorder && ./install.sh
 audio-recorder setup    # Configure HuggingFace token
 ```
 
+By default `install.sh` **copies** the tool into `~/.local/share/audio-recorder/` and links a
+launcher in `~/.local/bin` — the install keeps working even if you move or delete this checkout.
+
+```bash
+./install.sh --link       # Dev mode: symlink to this checkout (edits go live)
+./install.sh --uninstall  # Remove the install (keeps your config & recordings)
+```
+
 **Requirements**: ffmpeg, [whisperx](https://github.com/m-bain/whisperX), [claude](https://github.com/anthropics/claude-code)
 
 ## Commands
