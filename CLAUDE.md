@@ -40,8 +40,11 @@ audio-recorder push [folder]           # pousser vers tuls.me (--with-audio pour
 - Deux pistes : le micro est enregistré à gauche, l'audio système à droite (tag mp3
   `comment=audio-recorder:L=mic,R=system`). À la transcription, chaque canal est
   normalisé à part avant le downmix (le monitor suit le volume de sortie), puis
-  `lib/transcript.py` attribue à `LOCAL_SPEAKER` les segments dont l'énergie est côté
-  micro — pyannote ne départage plus que les participants distants. Les anciens
+  `lib/transcript.py` attribue à `LOCAL_SPEAKER` les segments où le micro est actif
+  (par trames de 100 ms, au-dessus de son bruit de fond et de la fuite des
+  haut-parleurs mesurée sur l'enregistrement) — pyannote ne départage plus que les
+  distants. Sans audio distant (réunion en présentiel), diarization seule ; en
+  hybride, toute la salle est attribuée à `LOCAL_SPEAKER`. Les anciens
   enregistrements (mixés) gardent la diarization seule.
 - Détection audio : Linux suit le sink/source par défaut (`pactl`). Bluetooth sans cas
   particulier : le monitor du sink bluez capte en A2DP comme en HFP, et WirePlumber
