@@ -68,6 +68,25 @@ cmd_transcribe() {
     info "Transcribing with WhisperX (model: $model)..."
     info "Input: $audio"
 
+    local dual_track=false
+    if [ "$(ffprobe -v error -show_entries format_tags=comment -of default=nw=1:nk=1 "$audio")" = "$DUAL_TRACK_TAG" ]; then
+        dual_track=true
+    fi
+
+    # Dual-track: level each channel on its own before the mono downmix — the
+    # system channel follows the output volume and can sit 20 dB below the mic.
+    local whisper_input="$audio" tmp_dir=""
+    if [ "$dual_track" = true ]; then
+        tmp_dir=$(mktemp -d)
+        whisper_input="$tmp_dir/$basename_noext.wav"
+        if ! ffmpeg -v error -i "$audio" -af "dynaudnorm=n=0,pan=mono|c0=0.5*c0+0.5*c1" \
+            -ar 16000 "$whisper_input"; then
+            rm -rf "$tmp_dir"
+            error "Failed to level the dual-track audio"
+            return 1
+        fi
+    fi
+
     # Run whisperx (write transcript lines to progress file in real-time)
     local progress_file="$output_dir/progress.txt"
     local whisper_log="$output_dir/whisperx.log"
@@ -93,14 +112,21 @@ cmd_transcribe() {
         lang_args=(--language "$WHISPER_LANGUAGE")
     fi
 
-    if ! PYTHONWARNINGS=ignore whisperx "$audio" \
+    # Domain vocabulary (names, products, acronyms) primes the first window and
+    # stops Whisper from mishearing them ("Cloud" for "Claude").
+    local prompt_args=()
+    if [[ -n "$WHISPER_INITIAL_PROMPT" ]]; then
+        prompt_args=(--initial_prompt "$WHISPER_INITIAL_PROMPT")
+    fi
+
+    if ! PYTHONWARNINGS=ignore whisperx "$whisper_input" \
         --model "$model" \
         --device "$device" \
         --batch_size "$batch_size" \
         --compute_type "$compute_type" \
         "${lang_args[@]}" \
+        "${prompt_args[@]}" \
         --diarize \
-        --diarize_model "pyannote/speaker-diarization-3.1" \
         --hf_token "$HF_TOKEN" \
         "${speaker_args[@]}" \
         --output_dir "$output_dir" 2>&1 | tee "$whisper_log" | awk -v pf="$progress_file" '
@@ -114,12 +140,14 @@ cmd_transcribe() {
         '
     then
         rm -f "$progress_file" 2>/dev/null
+        rm -rf "$tmp_dir"
         error "WhisperX failed. See log: $whisper_log"
         tail -20 "$whisper_log" >&2
         return 1
     fi
 
     rm -f "$progress_file" 2>/dev/null
+    rm -rf "$tmp_dir"
 
     local whisper_json="$output_dir/$basename_noext.json"
     local whisper_output="$output_dir/$basename_noext.txt"
@@ -132,19 +160,13 @@ cmd_transcribe() {
 
     # Format transcript from JSON (has timestamps + speakers)
     if [ -f "$whisper_json" ]; then
-        python3 -c "
-import json, sys
-with open('$whisper_json') as f:
-    data = json.load(f)
-for seg in data.get('segments', []):
-    start = int(seg.get('start', 0))
-    speaker = seg.get('speaker', 'UNKNOWN')
-    text = seg.get('text', '').strip()
-    if not text:
-        continue
-    mm, ss = divmod(start, 60)
-    print(f'[{mm:02d}:{ss:02d}] {speaker}: {text}')
-" > "$transcript"
+        local track_args=()
+        [ "$dual_track" = true ] && track_args=(--dual-track)
+        python3 -I "$SCRIPT_DIR/lib/transcript.py" "$whisper_json" "$audio" "${track_args[@]}" \
+            --local-speaker "${LOCAL_SPEAKER:-ME}" > "$transcript" || {
+            error "Transcript formatting failed"
+            return 1
+        }
         rm -f "$whisper_json"
         rm -f "$whisper_output" 2>/dev/null
     elif [ -f "$whisper_output" ]; then

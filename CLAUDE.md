@@ -6,12 +6,13 @@ CLI bash pour enregistrer des réunions, transcrire (WhisperX) et générer des 
 
 ```bash
 ./install.sh           # symlink ~/.local/bin, vérifie ffmpeg/whisperx/claude
-audio-recorder setup   # configure HF_TOKEN, RECORDINGS_DIR, WHISPER_MODEL, TULS_API_TOKEN
+audio-recorder setup   # configure HF_TOKEN, RECORDINGS_DIR, WHISPER_MODEL, LOCAL_SPEAKER,
+                       # WHISPER_LANGUAGE, WHISPER_INITIAL_PROMPT, TULS_API_TOKEN
 ```
 
 WhisperX utilise pyannote pour la diarization : token HuggingFace (Read) requis, et
-il faut accepter les conditions de `pyannote/speaker-diarization-3.1` et
-`pyannote/segmentation-3.0` sur huggingface.co avant le premier `setup`.
+il faut accepter les conditions de `pyannote/speaker-diarization-community-1` (modèle
+par défaut de whisperx ≥ 3.8) sur huggingface.co avant le premier `setup`.
 macOS : `brew install --cask background-music` pour capter l'audio système.
 
 ## Utilisation
@@ -36,8 +37,18 @@ audio-recorder push [folder]           # pousser vers tuls.me (--with-audio pour
 - Trim : détecte les silences >3s en un seul pass ffmpeg, cherche le premier silence
   ≥10s après 5 min (fallback : rupture de densité) ; l'original est toujours gardé en
   `audio_full.mp3`.
-- Détection audio : Linux suit le sink/source actif (`pactl`, BT inclus) ; macOS passe
-  par AVFoundation + Background Music. Auto-unmute si le mic est muté ou < 50 %.
+- Deux pistes : le micro est enregistré à gauche, l'audio système à droite (tag mp3
+  `comment=audio-recorder:L=mic,R=system`). À la transcription, chaque canal est
+  normalisé à part avant le downmix (le monitor suit le volume de sortie), puis
+  `lib/transcript.py` attribue à `LOCAL_SPEAKER` les segments dont l'énergie est côté
+  micro — pyannote ne départage plus que les participants distants. Les anciens
+  enregistrements (mixés) gardent la diarization seule.
+- Détection audio : Linux suit le sink/source par défaut (`pactl`). Bluetooth sans cas
+  particulier : le monitor du sink bluez capte en A2DP comme en HFP, et WirePlumber
+  bascule seul en HFP quand le micro du casque s'ouvre puis revient en A2DP. macOS passe
+  par AVFoundation + Background Music. Auto-unmute du micro s'il est muté.
+- `WHISPER_INITIAL_PROMPT` : vocabulaire (noms, produits, sigles) passé en amorce à
+  Whisper — corrige les mots mal entendus (« Cloud » pour « Claude »).
   Watchdog toutes les 2 min : notification desktop si le niveau capté est < -60 dB.
 - `summarize` refuse un transcript < 2 lignes ; le renommage de dossier est contraint
   à `[a-z0-9_]`, 50 caractères max, sinon laissé tel quel.

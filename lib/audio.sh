@@ -5,8 +5,6 @@
 # Audio sources
 # ─────────────────────────────────────────────────────────────────────────────
 
-BT_PROFILE_FILE="/tmp/audio-recorder-bt-profile"
-
 get_sources() {
     local devices
     case "$OS" in
@@ -19,42 +17,13 @@ get_sources() {
             [ -z "$MIC" ] && MIC="0"
             ;;
         *)
-            local default_sink
-            default_sink=$(pactl get-default-sink)
-
-            if echo "$default_sink" | grep -qi "bluez"; then
-                # A2DP monitor doesn't capture in PipeWire.
-                # Switch to HFP: monitor works + BT mic available.
-                local bt_card
-                bt_card=$(pactl list cards short 2>/dev/null | grep bluez | cut -f2)
-                if [ -n "$bt_card" ]; then
-                    echo "$bt_card" > "$BT_PROFILE_FILE"
-                    pactl set-card-profile "$bt_card" headset-head-unit
-                    sleep 0.5
-                    # HFP sink may not be default — force it
-                    local bt_sink
-                    bt_sink=$(pactl list short sinks | grep bluez | cut -f2)
-                    if [ -n "$bt_sink" ]; then
-                        pactl set-default-sink "$bt_sink"
-                        default_sink="$bt_sink"
-                    fi
-                fi
-            fi
-
-            MONITOR="${default_sink}.monitor"
+            # Bluetooth needs no special case: the bluez sink monitor captures in
+            # both A2DP and HFP, and WirePlumber switches the headset to HFP as
+            # soon as its mic is opened, then back to A2DP when released.
+            MONITOR="$(pactl get-default-sink).monitor"
             MIC="$(pactl get-default-source)"
             ;;
     esac
-}
-
-cleanup_bt_profile() {
-    if [ ! -f "$BT_PROFILE_FILE" ]; then
-        return
-    fi
-    local bt_card
-    bt_card=$(cat "$BT_PROFILE_FILE")
-    pactl set-card-profile "$bt_card" a2dp-sink 2>/dev/null
-    rm -f "$BT_PROFILE_FILE"
 }
 
 ensure_mic_active() {
@@ -128,12 +97,18 @@ cmd_start() {
     echo "$name" > "$NAME_FILE"
     date +%s > "$START_TIME_FILE"
 
+    # Mic and system audio stay on separate channels (L/R) instead of being
+    # mixed, so transcription can tell the local speaker from the remote ones.
+    local dual_track_args=(
+        -filter_complex "[0:a]aresample=48000,aformat=channel_layouts=mono[sys];[1:a]aresample=48000,aformat=channel_layouts=mono[mic];[mic][sys]join=inputs=2:channel_layout=stereo:map=0.0-FL|1.0-FR[out]"
+        -map "[out]" -metadata comment="$DUAL_TRACK_TAG"
+    )
+
     case "$OS" in
         Darwin)
             if [ -n "$MONITOR" ]; then
                 ffmpeg -f avfoundation -i ":$MONITOR" -f avfoundation -i ":$MIC" \
-                    -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[out]" \
-                    -map "[out]" -codec:a libmp3lame -q:a 2 \
+                    "${dual_track_args[@]}" -codec:a libmp3lame -q:a 2 \
                     "$folder/audio.mp3" &>/dev/null &
             else
                 ffmpeg -f avfoundation -i ":$MIC" -codec:a libmp3lame -q:a 2 \
@@ -142,8 +117,7 @@ cmd_start() {
             ;;
         *)
             ffmpeg -f pulse -i "$MONITOR" -f pulse -i "$MIC" \
-                -filter_complex "[0:a]aresample=48000[sys];[1:a]aresample=48000[mic];[sys][mic]amix=inputs=2:duration=longest:normalize=0[mix];[mix]alimiter=limit=0.8[out]" \
-                -map "[out]" -codec:a libmp3lame -q:a 2 \
+                "${dual_track_args[@]}" -codec:a libmp3lame -q:a 2 \
                 "$folder/audio.mp3" &>/dev/null &
             ;;
     esac
@@ -221,9 +195,6 @@ cmd_stop() {
     # Stop ffmpeg
     kill "$(cat "$PID_FILE")" 2>/dev/null
     rm -f "$PID_FILE"
-
-    # Restore A2DP profile if we switched to HFP
-    cleanup_bt_profile
 
     local name folder start_time
     name=$(cat "$NAME_FILE" 2>/dev/null)

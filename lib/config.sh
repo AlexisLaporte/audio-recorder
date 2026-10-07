@@ -17,6 +17,11 @@ START_TIME_FILE="/tmp/audio-recorder-start"
 FOLDER_FILE="/tmp/audio-recorder-folder"
 NAME_FILE="/tmp/audio-recorder-name"
 
+# Recordings tagged with this keep the mic on the left channel and the system
+# audio on the right (lib/audio.sh), which lib/transcript.py uses to pin the
+# local speaker.
+DUAL_TRACK_TAG="audio-recorder:L=mic,R=system"
+
 # Load config
 load_config() {
     # shellcheck source=/dev/null
@@ -54,6 +59,17 @@ setup() {
     [ -n "$new_model" ] && WHISPER_MODEL="$new_model"
     [ -z "$WHISPER_MODEL" ] && WHISPER_MODEL="$current_model"
 
+    # Your name in transcripts (dual-track recordings pin the mic to you)
+    read -rp "Your speaker name [${LOCAL_SPEAKER:-ME}]: " new_speaker
+    [ -n "$new_speaker" ] && LOCAL_SPEAKER="$new_speaker"
+    LOCAL_SPEAKER="${LOCAL_SPEAKER:-ME}"
+
+    # Transcription language and vocabulary
+    read -rp "Transcription language, empty = auto (fr/en/...) [$WHISPER_LANGUAGE]: " new_lang
+    [ -n "$new_lang" ] && WHISPER_LANGUAGE="$new_lang"
+    read -rp "Vocabulary hint (names, products, acronyms) [$WHISPER_INITIAL_PROMPT]: " new_prompt
+    [ -n "$new_prompt" ] && WHISPER_INITIAL_PROMPT="$new_prompt"
+
     # Tuls API token
     local current_tuls="${TULS_API_TOKEN:-(not set)}"
     [ ${#current_tuls} -gt 20 ] && current_tuls="${current_tuls:0:10}...${current_tuls: -4}"
@@ -65,6 +81,9 @@ setup() {
 HF_TOKEN="$HF_TOKEN"
 RECORDINGS_DIR="$RECORDINGS_DIR"
 WHISPER_MODEL="$WHISPER_MODEL"
+WHISPER_LANGUAGE="$WHISPER_LANGUAGE"
+WHISPER_INITIAL_PROMPT="$WHISPER_INITIAL_PROMPT"
+LOCAL_SPEAKER="$LOCAL_SPEAKER"
 TULS_API_TOKEN="$TULS_API_TOKEN"
 EOF
     chmod 600 "$CONFIG_FILE"
