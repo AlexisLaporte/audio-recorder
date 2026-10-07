@@ -79,8 +79,26 @@ cmd_transcribe() {
         speaker_args=(--min_speakers "$num_speakers" --max_speakers "$num_speakers")
     fi
 
+    # VRAM-safety knobs (override via env). Defaults tuned to avoid OOM on long
+    # recordings: smaller batch + int8 compute keep peak VRAM well under budget.
+    # WHISPER_DEVICE=cpu lets transcription run without a working GPU (slower).
+    local batch_size="${WHISPER_BATCH_SIZE:-4}"
+    local compute_type="${WHISPER_COMPUTE_TYPE:-int8}"
+    local device="${WHISPER_DEVICE:-cuda}"
+
+    # Force language (skip auto-detect). Useful when a chunk starts on silence
+    # and language detection misfires. Empty = auto-detect (default).
+    local lang_args=()
+    if [[ -n "$WHISPER_LANGUAGE" ]]; then
+        lang_args=(--language "$WHISPER_LANGUAGE")
+    fi
+
     if ! PYTHONWARNINGS=ignore whisperx "$audio" \
         --model "$model" \
+        --device "$device" \
+        --batch_size "$batch_size" \
+        --compute_type "$compute_type" \
+        "${lang_args[@]}" \
         --diarize \
         --diarize_model "pyannote/speaker-diarization-3.1" \
         --hf_token "$HF_TOKEN" \
